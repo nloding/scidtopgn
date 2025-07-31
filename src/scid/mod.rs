@@ -6,4 +6,4 @@ pub mod games;
 pub mod moves;
 
 pub use database::ScidDatabase;
-pub use index::{ScidHeader, GameIndex};
+pub use index::{ScidHeader, GameIndex, IndexFile};

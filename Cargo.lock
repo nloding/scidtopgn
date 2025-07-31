@@ -135,6 +135,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "scid_parser"
+version = "0.1.0"
+
+[[package]]
 name = "scidtopgn"
 version = "0.1.0"
 dependencies = [
