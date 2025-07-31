@@ -1,0 +1,32 @@
+# SCID in debian-based docker container.
+#
+# Using the SCID chess DB implementation here:
+# http://scidvspc.sourceforge.net/
+#
+# Copied from: https://github.com/ksylvan/scidvspc
+
+FROM debian:trixie-slim
+
+LABEL maintainer="Nathan Loding <nathan@loding.dev>"
+
+ENV SCID_VERSION="4.26"
+
+ADD https://downloads.sourceforge.net/project/scidvspc/source/scid_vs_pc-${SCID_VERSION}.tgz /home/scid/
+COPY ./test/data/five.pgn /home/scid
+COPY ./test/data/five.sg4 /home/scid
+COPY ./test/data/five.si4 /home/scid
+COPY ./test/data/five.sn4 /home/scid
+
+WORKDIR /home/scid
+
+RUN if [ ! -d scid_vs_pc-${SCID_VERSION} ]; then tar xvzf scid_vs_pc-${SCID_VERSION}.tgz; fi \
+  && cd scid_vs_pc-${SCID_VERSION} \
+  && BUILD_PKGS="make g++ tk-dev tcl-dev" && RUNTIME_PKGS="tk tcl tcl-snack" \
+  && MISC_PKGS="inetutils-ping stockfish ssh" \
+  && apt-get update \
+  && apt-get -y install ${RUNTIME_PKGS} ${MISC_PKGS} ${BUILD_PKGS} \
+  && ./configure && make install \
+  && cp -r sounds /usr/local/share/scid/ \
+  && cd ..
+
+# ENTRYPOINT ["/bin/bash"]
