@@ -29,10 +29,10 @@ The index file contains a header followed by fixed-size entries for each game.
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
 | 0-7 | 8 bytes | Magic | "Scid.si\0" (identifier string) |
-| 8-9 | 2 bytes | Version | SCID version number (little-endian) |
-| 10-13 | 4 bytes | BaseType | Database type identifier |
-| 14-16 | 3 bytes | NumGames | Number of games (little-endian) |
-| 17-19 | 3 bytes | AutoLoad | Auto-load game number |
+| 8-9 | 2 bytes | Version | SCID version number (big-endian) |
+| 10-13 | 4 bytes | BaseType | Database type identifier (big-endian) |
+| 14-16 | 3 bytes | NumGames | Number of games (big-endian, 24-bit) |
+| 17-19 | 3 bytes | AutoLoad | Auto-load game number (big-endian, 24-bit) |
 | 20-127 | 108 bytes | Description | Database description string |
 | 128-181 | 54 bytes | CustomFlags | 6 custom flag descriptions (9 bytes each) |
 
@@ -469,19 +469,32 @@ fn parse_dates_field(dates_field: u32) -> (GameDate, Option<EventDate>) {
 
 ### Endianness and Byte Order
 
-**Critical**: All multi-byte values in SCID files are stored in **little-endian** format. This includes:
+**🚨 CRITICAL CORRECTION**: All multi-byte values in SCID files are stored in **BIG-ENDIAN** format (not little-endian as previously documented). This has been verified through systematic experimentation and cross-validation against SCID source code.
+
+**Affected Fields** (ALL numeric multi-byte fields):
 - All integer fields in headers (version, game counts, etc.)
-- All packed ID fields in index entries
-- The critical Dates field containing game and event dates
+- All packed ID fields in index entries  
+- **The critical Dates field containing game and event dates**
 - ELO ratings and other numeric values
-- Offsets and lengths
+- Game offsets and lengths
+- Flag fields and result codes
 
-**Example**: A 32-bit value `0x12345678` is stored as bytes `[0x78, 0x56, 0x34, 0x12]`
+**Example**: A 32-bit value `0x12345678` is stored as bytes `[0x12, 0x34, 0x56, 0x78]`
 
-When reading multi-byte values, always use little-endian conversion:
+**Correct Implementation**:
 ```rust
-let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+// ✅ CORRECT - Use big-endian conversion for ALL SCID multi-byte values
+let version = u16::from_be_bytes([bytes[0], bytes[1]]);
+let dates_field = u32::from_be_bytes([bytes[25], bytes[26], bytes[27], bytes[28]]);
+let player_id = u16::from_be_bytes([bytes[10], bytes[11]]);
 ```
+
+**Source Code Verification**: This matches SCID's `mfile.cpp` implementation:
+- `ReadTwoBytes()`: Reads high byte first, then low byte (big-endian)
+- `ReadFourBytes()`: Reads bytes in big-endian order
+- All SCID numeric fields follow this pattern
+
+**Historical Note**: Previous documentation incorrectly assumed little-endian format. This error was discovered through the `experiments/scid_parser/` systematic testing framework and corrected in August 2025.
 
 ### Error Handling and Validation
 
@@ -673,10 +686,52 @@ To verify your SCID parser is working correctly:
    - Monitor memory usage during parsing
    - Benchmark parsing speed vs file size
 
+## Verification Methodology
+
+This documentation has been verified through systematic reverse engineering using the **Experiments Framework**:
+
+### Experiments Framework (August 2025)
+**Location**: `experiments/scid_parser/` - Complete test harness for binary format understanding
+
+**Methodology**:
+1. **Iterative Field Analysis**: Parse each field individually with comprehensive debug output
+2. **Cross-Validation**: Compare every implementation against SCID source code methods
+3. **Small, Incremental Changes**: Build understanding field-by-field with thorough testing
+4. **Big-Endian Discovery**: Systematic testing revealed true byte order through version/count field analysis
+
+**Key Discoveries**:
+- **Endianness**: All SCID multi-byte values use big-endian (verified via `mfile.cpp`)
+- **Date Location**: Fixed offset 25-28 in 47-byte game index (not variable position)  
+- **Date Format**: Lower 20 bits = game date, upper 12 bits = event date (relative encoding)
+- **ID Packing**: Player IDs (20-bit), Event/Site IDs (19-bit), Round IDs (18-bit)
+- **Bit Field Extraction**: Precise bit manipulation for flags, results, ELO ratings
+
+**Validation Results**:
+- Version: 400 ✅ (was showing 36865 with little-endian)
+- Game Count: 5 ✅ (was showing 327680 with little-endian)  
+- Date: "2022.12.19" ✅ (successfully extracted from `test/data/five.si4`)
+- Player IDs: White=0, Black=1 ✅ (correctly parsed from packed format)
+- Result: 3 → "1/2-1/2" ✅ (draw result correctly decoded)
+
+### Cross-Reference Implementation
+**Complete Working Parser**: `experiments/scid_parser/src/si4.rs`
+- All 47-byte index fields successfully parsed
+- Every field implementation validated against SCID source methods
+- Comprehensive debug output for field-by-field verification
+- Proven methodology for binary format reverse engineering
+
 ## References
 
-This documentation is based on analysis of the official SCID source code:
-- `scidvspc/src/index.cpp` - Index file reading/writing
-- `scidvspc/src/index.h` - Index structure definitions  
-- `scidvspc/src/date.h` - Date encoding constants
-- `scidvspc/src/namebase.cpp` - Name file handling
+This documentation is based on analysis of the official SCID source code and systematic experimentation:
+
+**Primary Source Code**:
+- `scidvspc/src/index.cpp` - Index file reading/writing (`IndexEntry::Read()` method)
+- `scidvspc/src/index.h` - Index structure definitions and field extraction methods
+- `scidvspc/src/mfile.cpp` - Multi-byte value reading (confirms big-endian usage)
+- `scidvspc/src/date.h` - Date encoding constants and bit field definitions
+- `scidvspc/src/namebase.cpp` - Name file handling and compression algorithms
+
+**Verification Framework**:  
+- `experiments/scid_parser/` - Complete working implementation with cross-validation
+- `test/data/five.si4` - Test database for validation of parsing accuracy
+- Systematic field-by-field analysis with comprehensive debug output
