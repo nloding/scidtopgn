@@ -100,8 +100,13 @@ impl PgnExporter {
             .unwrap_or("Unknown Site");
         writeln!(writer, "[Site \"{}\"]", site)?;
         
-        // Date
-        writeln!(writer, "[Date \"{}\"]", game_index.date_string())?;
+        // Date (game date)
+        writeln!(writer, "[Date \"{}\"]", game_index.game_date_string())?;
+        
+        // EventDate (if different from game date)
+        if let Some(event_date_str) = game_index.event_date_string() {
+            writeln!(writer, "[EventDate \"{}\"]", event_date_str)?;
+        }
         
         // Round
         let round = database.round_name(game_index.round_id)

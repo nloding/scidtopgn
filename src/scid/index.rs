@@ -40,6 +40,13 @@ pub struct ScidHeader {
 }
 
 #[derive(Debug, Clone)]
+pub struct ScidDate {
+    pub year: u16,
+    pub month: u8, 
+    pub day: u8,
+}
+
+#[derive(Debug, Clone)]
 pub struct GameIndex {
     pub offset: u32,        // Offset in .sg4 file (3 bytes)
     pub length: u16,        // Length of game data in .sg4 (2 bytes)
@@ -48,9 +55,11 @@ pub struct GameIndex {
     pub event_id: u32,      // Event ID in .sn4 (3 bytes)
     pub site_id: u32,       // Site ID in .sn4 (3 bytes)
     pub round_id: u16,      // Round ID in .sn4 (2 bytes)
-    pub year: u16,          // Year (2 bytes)
-    pub month: u8,          // Month (1 byte)
-    pub day: u8,            // Day (1 byte)
+    pub year: u16,          // Year (2 bytes) - kept for backward compatibility
+    pub month: u8,          // Month (1 byte) - kept for backward compatibility
+    pub day: u8,            // Day (1 byte) - kept for backward compatibility
+    pub game_date: ScidDate, // Game date (extracted from dates field)
+    pub event_date: Option<ScidDate>, // Event date (extracted from dates field, if present)
     pub result: u8,         // Game result (1 byte)
     pub eco: u16,           // ECO code (2 bytes)
     pub white_elo: u16,     // White player rating (2 bytes)
@@ -204,26 +213,11 @@ impl IndexFile {
         let var_counts = Self::read_u16_le(&mut cursor)?; // VarCounts (2 bytes)
         let eco = Self::read_u16_le(&mut cursor)?; // EcoCode (2 bytes)
 
-        // 5. Date - Read from fixed position (25-28 bytes) according to SCID IndexEntry::Read()
-        // Based on SCID source code analysis: Dates field is at offset 25 in the 47-byte index
-        const DATE_FIELD_OFFSET: usize = 25;
+        // 5. Date - Continue reading sequentially according to SCID IndexEntry::Read()
+        // The Dates field should be at the current cursor position after VarCounts and EcoCode
+        let date_value = Self::read_u32_le(&mut cursor)?; // Dates (4 bytes)
         
-        if debug_bytes.len() < DATE_FIELD_OFFSET + 4 {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "Index entry too short for date field"
-            ));
-        }
-        
-        // Read the 4-byte Dates field from the fixed offset
-        let date_value = u32::from_le_bytes([
-            debug_bytes[DATE_FIELD_OFFSET],
-            debug_bytes[DATE_FIELD_OFFSET + 1], 
-            debug_bytes[DATE_FIELD_OFFSET + 2],
-            debug_bytes[DATE_FIELD_OFFSET + 3]
-        ]);
-        
-        println!("DEBUG: Read date field 0x{:08x} from fixed offset {}", date_value, DATE_FIELD_OFFSET);
+        println!("DEBUG: Read date field 0x{:08x} from sequential read", date_value);
         
         // The date has been extracted from the cd93 pattern
 
@@ -244,26 +238,57 @@ impl IndexFile {
         // CRITICAL DATE PARSING FIX - PROPER SCID DATE DECODING
         // 
         // SCID Date Encoding (from official source code analysis):
-        // - Format: 32-bit field with date in lower 20 bits (u32_low_20)
-        // - Bits 0-4:   Day (1-31)     - 5 bits 
-        // - Bits 5-8:   Month (1-12)   - 4 bits
-        // - Bits 9-19:  Year           - 11 bits (NO OFFSET - years stored directly)
+        // - Format: 32-bit field with BOTH game date (lower 20 bits) AND event date (upper 12 bits)
+        // - Game Date (Bits 0-19): Day(0-4), Month(5-8), Year(9-19) - absolute encoding
+        // - Event Date (Bits 20-31): Day(0-4), Month(5-8), YearOffset(9-11) - relative encoding
         // - DATE_MAKE(y,m,d) = ((y << 9) | (m << 5) | d)
         //
-        // Extract date from the lower 20 bits only (EventDate uses upper 12 bits)
-        let date_20bit = date_value & 0x000FFFFF; // u32_low_20 equivalent
+        // Extract game date from the lower 20 bits
+        let game_date_raw = date_value & 0x000FFFFF; // Lower 20 bits
         
-        println!("DEBUG: Extracting date from 20-bit value 0x{:05x} (full: 0x{:08x})", date_20bit, date_value);
+        println!("DEBUG: Extracting game date from 20-bit value 0x{:05x} (full: 0x{:08x})", game_date_raw, date_value);
         
-        // Decode using official SCID format: Day(0-4), Month(5-8), Year(9-19) - NO YEAR OFFSET
-        let day = (date_20bit & 31) as u8;                    // Bits 0-4
-        let month = ((date_20bit >> 5) & 15) as u8;           // Bits 5-8  
-        let year = ((date_20bit >> 9) & 0x7FF) as u16;        // Bits 9-19, NO OFFSET
+        // Decode game date using official SCID format: Day(0-4), Month(5-8), Year(9-19) - NO YEAR OFFSET
+        let game_day = (game_date_raw & 31) as u8;                    // Bits 0-4
+        let game_month = ((game_date_raw >> 5) & 15) as u8;           // Bits 5-8  
+        let game_year = ((game_date_raw >> 9) & 0x7FF) as u16;        // Bits 9-19, NO OFFSET
         
-        println!("DEBUG: Date decode: day={}, month={}, year={} (no offset applied)", 
-                day, month, year);
+        println!("DEBUG: Game date decode: day={}, month={}, year={} (no offset applied)", 
+                game_day, game_month, game_year);
         
-        let (actual_year, month, day) = (year, month, day);
+        let game_date = ScidDate {
+            year: game_year,
+            month: game_month,
+            day: game_day,
+        };
+        
+        // Extract event date from upper 12 bits (relative encoding)
+        let event_data = (date_value >> 20) & 0xFFF;
+        println!("DEBUG: Event data: 0x{:03x}", event_data);
+        
+        let event_date = if event_data == 0 {
+            None  // No event date set
+        } else {
+            let event_day = (event_data & 31) as u8;
+            let event_month = ((event_data >> 5) & 15) as u8;
+            let year_offset = ((event_data >> 9) & 7) as u16;
+            
+            if year_offset == 0 {
+                None  // Invalid year offset
+            } else {
+                let event_year = game_year + year_offset - 4;
+                println!("DEBUG: Event date decode: day={}, month={}, year={} (game_year + {} - 4)", 
+                    event_day, event_month, event_year, year_offset);
+                Some(ScidDate {
+                    year: event_year,
+                    month: event_month,
+                    day: event_day,
+                })
+            }
+        };
+        
+        // Keep backward compatibility fields
+        let (actual_year, month, day) = (game_year, game_month, game_day);
 
         // Decode packed IDs - Fixed based on SCID source code analysis
         // The high bytes are packed in the _high fields, need to reconstruct 3-byte values
@@ -308,9 +333,11 @@ impl IndexFile {
             event_id,
             site_id,
             round_id: round_id as u16, // Cast to u16 for now  
-            year: actual_year,
-            month,
-            day,
+            year: actual_year,  // Backward compatibility
+            month,              // Backward compatibility
+            day,                // Backward compatibility
+            game_date,
+            event_date,
             result,
             eco,
             white_elo: white_elo_rating,
@@ -357,6 +384,21 @@ impl IndexFile {
     }
 }
 
+impl ScidDate {
+    /// Format the date as YYYY.MM.DD
+    pub fn date_string(&self) -> String {
+        // Handle invalid dates more gracefully
+        if self.year == 0 || self.year > 2100 {
+            "????.??.??".to_string()
+        } else {
+            let safe_month = if self.month == 0 || self.month > 12 { 1 } else { self.month };
+            let safe_day = if self.day == 0 || self.day > 31 { 1 } else { self.day };
+            
+            format!("{:04}.{:02}.{:02}", self.year, safe_month, safe_day)
+        }
+    }
+}
+
 impl GameIndex {
     /// Get game result as a human-readable string
     pub fn result_string(&self) -> &'static str {
@@ -376,15 +418,17 @@ impl GameIndex {
     
     /// Format the game date as YYYY.MM.DD
     pub fn date_string(&self) -> String {
-        // Handle invalid dates more gracefully
-        if self.year == 0 || self.year > 2100 {
-            "????.??.??".to_string()
-        } else {
-            let safe_month = if self.month == 0 || self.month > 12 { 1 } else { self.month };
-            let safe_day = if self.day == 0 || self.day > 31 { 1 } else { self.day };
-            
-            format!("{:04}.{:02}.{:02}", self.year, safe_month, safe_day)
-        }
+        self.game_date.date_string()
+    }
+    
+    /// Format the game date as YYYY.MM.DD (new method name for clarity)
+    pub fn game_date_string(&self) -> String {
+        self.game_date.date_string()
+    }
+    
+    /// Format the event date as YYYY.MM.DD if available
+    pub fn event_date_string(&self) -> Option<String> {
+        self.event_date.as_ref().map(|date| date.date_string())
     }
 }
 
@@ -434,6 +478,8 @@ mod tests {
             year: 2022,
             month: 12,
             day: 19,
+            game_date: ScidDate { year: 2022, month: 12, day: 19 },
+            event_date: None,
             result: 0,
             eco: 0,
             white_elo: 0,
@@ -459,7 +505,10 @@ mod tests {
         // Test invalid year
         let mut game_index = GameIndex {
             offset: 0, length: 0, white_id: 0, black_id: 0, event_id: 0, site_id: 0, round_id: 0,
-            year: 0, month: 12, day: 19, result: 0, eco: 0, white_elo: 0, black_elo: 0, flags: 0,
+            year: 0, month: 12, day: 19, 
+            game_date: ScidDate { year: 0, month: 12, day: 19 },
+            event_date: None,
+            result: 0, eco: 0, white_elo: 0, black_elo: 0, flags: 0,
             num_half_moves: 0, stored_line_code: 0, final_material: [0, 0], pawn_advancement: [0, 0],
             var_count: 0, comment_count: 0, nag_count: 0, deleted: 0, reserved: [0; 5],
         };
@@ -469,17 +518,21 @@ mod tests {
         // Test invalid month  
         game_index.year = 2022;
         game_index.month = 0;
+        game_index.game_date = ScidDate { year: 2022, month: 0, day: 19 };
         assert_eq!(game_index.date_string(), "2022.01.19");
         
         game_index.month = 15;
+        game_index.game_date = ScidDate { year: 2022, month: 15, day: 19 };
         assert_eq!(game_index.date_string(), "2022.01.19");
         
         // Test invalid day
         game_index.month = 12;
         game_index.day = 0;
+        game_index.game_date = ScidDate { year: 2022, month: 12, day: 0 };
         assert_eq!(game_index.date_string(), "2022.12.01");
         
         game_index.day = 35;
+        game_index.game_date = ScidDate { year: 2022, month: 12, day: 35 };
         assert_eq!(game_index.date_string(), "2022.12.01");
     }
 
@@ -488,7 +541,10 @@ mod tests {
     fn test_result_string() {
         let mut game_index = GameIndex {
             offset: 0, length: 0, white_id: 0, black_id: 0, event_id: 0, site_id: 0, round_id: 0,
-            year: 2022, month: 12, day: 19, result: 0, eco: 0, white_elo: 0, black_elo: 0, flags: 0,
+            year: 2022, month: 12, day: 19, 
+            game_date: ScidDate { year: 2022, month: 12, day: 19 },
+            event_date: None,
+            result: 0, eco: 0, white_elo: 0, black_elo: 0, flags: 0,
             num_half_moves: 0, stored_line_code: 0, final_material: [0, 0], pawn_advancement: [0, 0],
             var_count: 0, comment_count: 0, nag_count: 0, deleted: 0, reserved: [0; 5],
         };
