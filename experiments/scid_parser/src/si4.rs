@@ -144,12 +144,6 @@ pub fn parse_game_length(length_low: u16, length_high: u8) -> u32 {
     let extended_bit = (length_high as u32 & 0x80) << 9;
     let total_length = base_length + extended_bit;
     
-    println!("DEBUG: Game length parsing:");
-    println!("  Length_Low (2 bytes): {} (0x{:04x})", length_low, length_low);
-    println!("  Length_High (1 byte): {} (0x{:02x})", length_high, length_high);
-    println!("  Extended bit (bit 7): {} (adds {} to length)", 
-        (length_high & 0x80) != 0, extended_bit); 
-    println!("  Total length: {} bytes", total_length);
     
     total_length
 }
@@ -158,9 +152,6 @@ pub fn parse_game_length(length_low: u16, length_high: u8) -> u32 {
 /// Based on SCID flag definitions in index.h
 /// Each bit represents a different game attribute or classification
 pub fn parse_game_flags(flags: u16) -> GameFlags {
-    println!("DEBUG: Game flags parsing:");
-    println!("  Flags (2 bytes): {} (0x{:04x} = 0b{:016b})", flags, flags, flags);
-    
     let parsed_flags = GameFlags {
         start:           (flags & (1 << 0)) != 0,   // IDX_FLAG_START = 0
         promotions:      (flags & (1 << 1)) != 0,   // IDX_FLAG_PROMO = 1
@@ -180,28 +171,6 @@ pub fn parse_game_flags(flags: u16) -> GameFlags {
         user:            (flags & (1 << 15)) != 0,  // IDX_FLAG_USER = 15
     };
     
-    println!("  Active flags:");
-    if parsed_flags.start { println!("    - Start position"); }
-    if parsed_flags.promotions { println!("    - Promotions"); }
-    if parsed_flags.under_promotions { println!("    - Under-promotions"); }
-    if parsed_flags.delete { println!("    - Marked for deletion"); }
-    if parsed_flags.white_opening { println!("    - White opening"); }
-    if parsed_flags.black_opening { println!("    - Black opening"); }
-    if parsed_flags.middlegame { println!("    - Middlegame"); }
-    if parsed_flags.endgame { println!("    - Endgame"); }
-    if parsed_flags.novelty { println!("    - Novelty"); }
-    if parsed_flags.pawn_structure { println!("    - Pawn structure"); }
-    if parsed_flags.tactics { println!("    - Tactics"); }
-    if parsed_flags.kingside { println!("    - Kingside play"); }
-    if parsed_flags.queenside { println!("    - Queenside play"); }
-    if parsed_flags.brilliancy { println!("    - Brilliancy"); }
-    if parsed_flags.blunder { println!("    - Blunder"); }
-    if parsed_flags.user { println!("    - User flag"); }
-    
-    if flags == 0 {
-        println!("    - No flags set");
-    }
-    
     parsed_flags
 }
 
@@ -215,12 +184,6 @@ pub fn parse_game_flags(flags: u16) -> GameFlags {
 /// 
 /// This gives 20-bit player IDs (4 + 16 bits), supporting 1,048,575 unique players
 pub fn parse_player_ids(white_black_high: u8, white_id_low: u16, black_id_low: u16) -> (u32, u32) {
-    println!("DEBUG: Player ID parsing:");
-    println!("  WhiteBlack_High (1 byte): {} (0x{:02x} = 0b{:08b})", 
-        white_black_high, white_black_high, white_black_high);
-    println!("  WhiteID_Low (2 bytes): {} (0x{:04x})", white_id_low, white_id_low);
-    println!("  BlackID_Low (2 bytes): {} (0x{:04x})", black_id_low, black_id_low);
-    
     // White player ID: high 4 bits from bits 4-7 of WhiteBlack_High + low 16 bits
     let white_high = (white_black_high >> 4) as u32;    // Extract bits 4-7
     let white_id = (white_high << 16) | (white_id_low as u32);
@@ -228,14 +191,6 @@ pub fn parse_player_ids(white_black_high: u8, white_id_low: u16, black_id_low: u
     // Black player ID: high 4 bits from bits 0-3 of WhiteBlack_High + low 16 bits  
     let black_high = (white_black_high & 0xF) as u32;   // Extract bits 0-3
     let black_id = (black_high << 16) | (black_id_low as u32);
-    
-    println!("  White player ID reconstruction:");
-    println!("    High 4 bits: {} (from bits 4-7)", white_high);
-    println!("    Combined: ({} << 16) | {} = {}", white_high, white_id_low, white_id);
-    
-    println!("  Black player ID reconstruction:");
-    println!("    High 4 bits: {} (from bits 0-3)", black_high);
-    println!("    Combined: ({} << 16) | {} = {}", black_high, black_id_low, black_id);
     
     (white_id, black_id)
 }
@@ -251,13 +206,6 @@ pub fn parse_player_ids(white_black_high: u8, white_id_low: u16, black_id_low: u
 /// 
 /// This gives Event/Site IDs with 19 bits each (3+16), Round IDs with 18 bits (2+16)
 pub fn parse_event_site_round_ids(event_site_rnd_high: u8, event_id_low: u16, site_id_low: u16, round_id_low: u16) -> (u32, u32, u32) {
-    println!("DEBUG: Event/Site/Round ID parsing:");
-    println!("  EventSiteRnd_High (1 byte): {} (0x{:02x} = 0b{:08b})", 
-        event_site_rnd_high, event_site_rnd_high, event_site_rnd_high);
-    println!("  EventID_Low (2 bytes): {} (0x{:04x})", event_id_low, event_id_low);
-    println!("  SiteID_Low (2 bytes): {} (0x{:04x})", site_id_low, site_id_low);
-    println!("  RoundID_Low (2 bytes): {} (0x{:04x})", round_id_low, round_id_low);
-    
     // Event ID: high 3 bits from bits 5-7 of EventSiteRnd_High + low 16 bits
     let event_high = (event_site_rnd_high >> 5) as u32;           // Extract bits 5-7
     let event_id = (event_high << 16) | (event_id_low as u32);
@@ -269,18 +217,6 @@ pub fn parse_event_site_round_ids(event_site_rnd_high: u8, event_id_low: u16, si
     // Round ID: high 2 bits from bits 0-1 of EventSiteRnd_High + low 16 bits
     let round_high = (event_site_rnd_high & 0x3) as u32;          // Extract bits 0-1, mask to 2 bits
     let round_id = (round_high << 16) | (round_id_low as u32);
-    
-    println!("  Event ID reconstruction:");
-    println!("    High 3 bits: {} (from bits 5-7)", event_high);
-    println!("    Combined: ({} << 16) | {} = {}", event_high, event_id_low, event_id);
-    
-    println!("  Site ID reconstruction:");
-    println!("    High 3 bits: {} (from bits 2-4)", site_high);
-    println!("    Combined: ({} << 16) | {} = {}", site_high, site_id_low, site_id);
-    
-    println!("  Round ID reconstruction:");
-    println!("    High 2 bits: {} (from bits 0-1)", round_high);
-    println!("    Combined: ({} << 16) | {} = {}", round_high, round_id_low, round_id);
     
     (event_id, site_id, round_id)
 }
@@ -385,58 +321,6 @@ pub fn parse_game_index(reader: &mut impl Read) -> io::Result<GameIndex> {
     let mut entry_bytes = [0u8; 47];
     reader.read_exact(&mut entry_bytes)?;
     
-    println!("Raw entry bytes (first 32): {:02x?}", &entry_bytes[0..32]);
-    println!("Raw entry bytes (last 15): {:02x?}", &entry_bytes[32..47]);
-    println!("Dates field bytes at offset 25-28: {:02x?}", &entry_bytes[25..29]);
-    
-    // Calculate what 2022.12.19 should encode to using different possible formats
-    let date_2022_12_19_standard = (2022u32 << 9) | (12u32 << 5) | 19u32;
-    let date_2022_12_19_with_offset = ((2022u32 - 1408) << 9) | (12u32 << 5) | 19u32; // Try reverse offset
-    let date_2022_12_19_alt = (2022u32 << 16) | (12u32 << 8) | 19u32; // Try different bit layout
-    
-    println!("Expected patterns for 2022.12.19:");
-    println!("  Standard SCID: 0x{:08x}", date_2022_12_19_standard);
-    println!("  With -1408 offset: 0x{:08x}", date_2022_12_19_with_offset);
-    println!("  Alt encoding: 0x{:08x}", date_2022_12_19_alt);
-    
-    // Search for ANY pattern containing the bytes 19, 12, or components of 2022
-    println!("Searching for date components (19, 12, 2022) in all 4-byte windows:");
-    for i in 0..=entry_bytes.len()-4 {
-        let pattern = u32::from_be_bytes([entry_bytes[i], entry_bytes[i+1], entry_bytes[i+2], entry_bytes[i+3]]);
-        let b0 = entry_bytes[i];
-        let b1 = entry_bytes[i+1];
-        let b2 = entry_bytes[i+2];
-        let b3 = entry_bytes[i+3];
-        
-        // Check if this 4-byte window contains our target values
-        if (b0 == 19 || b1 == 19 || b2 == 19 || b3 == 19) &&
-           (b0 == 12 || b1 == 12 || b2 == 12 || b3 == 12) {
-            println!("  Offset {}: 0x{:08x} (bytes: {} {} {} {}) - contains 19 and 12", 
-                i, pattern, b0, b1, b2, b3);
-        }
-        
-        // Check for 2022 components
-        let w0 = u16::from_be_bytes([b0, b1]);
-        let w1 = u16::from_be_bytes([b2, b3]);
-        if w0 == 2022 || w1 == 2022 {
-            println!("  Offset {}: 0x{:08x} (words: {} {}) - contains 2022", 
-                i, pattern, w0, w1);
-        }
-        
-        // Check against our calculated patterns
-        if pattern == date_2022_12_19_standard || pattern == date_2022_12_19_with_offset || pattern == date_2022_12_19_alt {
-            println!("  Offset {}: 0x{:08x} - MATCHES calculated pattern!", i, pattern);
-        }
-    }
-    
-    // Search for the old hardcoded pattern too
-    let target_pattern = 0x0944cd93u32;
-    for i in 0..=entry_bytes.len()-4 {
-        let pattern = u32::from_be_bytes([entry_bytes[i], entry_bytes[i+1], entry_bytes[i+2], entry_bytes[i+3]]);
-        if pattern == target_pattern {
-            println!("Found old hardcoded pattern at offset {}: 0x{:08x}", i, pattern);
-        }
-    }
     
     // Parse using cursor for easier reading
     let mut cursor = std::io::Cursor::new(entry_bytes);
@@ -480,41 +364,17 @@ pub fn parse_game_index(reader: &mut impl Read) -> io::Result<GameIndex> {
     
     // Dates field uses big-endian like all SCID multi-byte values
     let dates_field = u32::from_be_bytes([entry_bytes[25], entry_bytes[26], entry_bytes[27], entry_bytes[28]]);
-    println!("SCID Dates field at offset 25-28: 0x{:08x}", dates_field);
     
     // Extract game date from lower 20 bits (as per SCID source: u32_low_20)
     let game_date = dates_field & 0x000FFFFF;
-    println!("Game date (lower 20 bits): 0x{:05x}", game_date);
     
     // Decode using exact SCID format with NO year offset (as per SCID source)
     let day = (game_date & 31) as u8;                    // Bits 0-4
     let month = ((game_date >> 5) & 15) as u8;           // Bits 5-8  
     let year = ((game_date >> 9) & 0x7FF) as u16;        // Bits 9-19, NO OFFSET
     
-    println!("Decoded with NO offset: {}.{:02}.{:02}", year, month, day);
-    
-    // If this doesn't give 2022.12.19, then we need to look elsewhere
-    if year == 2022 && month == 12 && day == 19 {
-        println!("SUCCESS! Found correct 2022.12.19 date");
-    } else {
-        println!("Still wrong date - need to investigate further");
-        
-        // Let's also check what the expected 2022.12.19 pattern should be
-        let expected_pattern = (2022u32 << 9) | (12u32 << 5) | 19u32;
-        println!("Expected pattern for 2022.12.19: 0x{:08x}", expected_pattern);
-        
-        // Search for this pattern in the entire entry
-        for i in 0..=entry_bytes.len()-4 {
-            let pattern = u32::from_be_bytes([entry_bytes[i], entry_bytes[i+1], entry_bytes[i+2], entry_bytes[i+3]]);
-            if (pattern & 0x000FFFFF) == expected_pattern {
-                println!("Found 2022.12.19 pattern at offset {}: 0x{:08x}", i, pattern);
-            }
-        }
-    }
-    
     // Also read the "official" dates field that cursor is pointing to for comparison
-    let dates_at_cursor = read_u32_be(&mut cursor)?;
-    println!("Date at cursor pos: 0x{:08x}", dates_at_cursor);
+    let _dates_at_cursor = read_u32_be(&mut cursor)?;
     
     // ELO ratings (2 + 2 bytes) - SCID uses big-endian
     let white_elo_raw = read_u16_be(&mut cursor)?;
