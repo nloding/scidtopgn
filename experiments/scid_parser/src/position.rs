@@ -27,6 +27,20 @@ pub enum PieceType {
     Pawn,
 }
 
+impl fmt::Display for PieceType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let symbol = match self {
+            PieceType::King => "King",
+            PieceType::Queen => "Queen",
+            PieceType::Rook => "Rook",
+            PieceType::Bishop => "Bishop",
+            PieceType::Knight => "Knight",
+            PieceType::Pawn => "Pawn",
+        };
+        write!(f, "{}", symbol)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Color {
     White,
@@ -386,10 +400,13 @@ impl ChessPosition {
             _ => return Err("Invalid castling move".to_string()),
         };
         
-        // Move rook
+        // Check if rook is actually present for castling
         if let Some(rook) = self.get_piece_at(rook_from) {
             if rook.piece_type != PieceType::Rook {
-                return Err("Expected rook for castling".to_string());
+                return Err(format!("Expected rook for castling at {}, found {:?}", rook_from, rook.piece_type));
+            }
+            if rook.color != chess_move.piece.color {
+                return Err(format!("Rook at {} belongs to wrong color for castling", rook_from));
             }
             
             // Update board
@@ -400,6 +417,8 @@ impl ChessPosition {
             self.piece_locations.insert(rook.id, rook_to);
             self.square_occupants.remove(&rook_from);
             self.square_occupants.insert(rook_to, rook);
+        } else {
+            return Err(format!("No rook found at {} for castling - may have been captured or moved", rook_from));
         }
         
         Ok(())

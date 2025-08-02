@@ -24,6 +24,7 @@ fn main() -> io::Result<()> {
         eprintln!("  {} test-position           - Test chess position tracking implementation", args[0]);
         eprintln!("  {} test-one-move           - Test single move decoding with position awareness", args[0]);
         eprintln!("  {} test-moves <base_path>  - Test position-aware move parsing on one game", args[0]);
+        eprintln!("  {} test-variations <base_path> - Test variation tree parsing with complex games", args[0]);
         eprintln!("  {} parse <base_path>       - Parse SCID database files (both .si4 and .sn4)", args[0]);
         std::process::exit(1);
     }
@@ -122,6 +123,72 @@ fn main() -> io::Result<()> {
                             } else {
                                 eprintln!("❌ No games found in file");
                             }
+                    } else {
+                        eprintln!("❌ No games found in file");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("❌ Failed to read SG4 file: {}", e);
+                }
+            }
+        }
+        "test-variations" => {
+            if args.len() != 3 {
+                eprintln!("Usage: {} test-variations <base_path>", args[0]);
+                eprintln!("Example: {} test-variations /path/to/database", args[0]);
+                std::process::exit(1);
+            }
+            
+            let base_path = &args[2];
+            let sg4_path = format!("{}.sg4", base_path);
+            
+            println!("🌳 TESTING VARIATION TREE PARSING");
+            println!("📂 Reading: {}", sg4_path);
+            
+            // Read the SG4 file
+            match std::fs::read(&sg4_path) {
+                Ok(file_data) => {
+                    // Parse game boundaries first
+                    let games = find_game_boundaries(&file_data);
+                    if !games.is_empty() {
+                        println!("📊 Found {} games", games.len());
+                        
+                        // Test on first game with variation support
+                        if let Some((start_offset, end_offset)) = games.first() {
+                            let game_data = &file_data[*start_offset..*end_offset];
+                            println!("\n🎮 Testing Game 1 with Variation Trees ({} bytes)", game_data.len());
+                            
+                            match parse_game_with_variation_trees(game_data, 1) {
+                                Ok((variation_tree, moves, notation)) => {
+                                    println!("\n🌳 VARIATION TREE RESULTS:");
+                                    println!("✅ Successfully parsed {} main line moves", moves.len());
+                                    println!("🌿 Variation tree depth: {}", variation_tree.current_depth);
+                                    println!("📝 Total elements in tree: {}", variation_tree.main_line.len());
+                                    
+                                    // Show variation structure
+                                    let variations_count = variation_tree.main_line.iter()
+                                        .map(|node| node.variations.len())
+                                        .sum::<usize>();
+                                    if variations_count > 0 {
+                                        println!("🌿 Found {} variations in the game", variations_count);
+                                    }
+                                    
+                                    // Show first few moves with variations
+                                    println!("\n📝 Generated notation with variations:");
+                                    for (i, note) in notation.iter().take(15).enumerate() {
+                                        println!("  {}. {}", i + 1, note);
+                                    }
+                                    if notation.len() > 15 {
+                                        println!("  ... and {} more moves", notation.len() - 15);
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("❌ Variation tree parsing failed: {}", e);
+                                }
+                            }
+                        } else {
+                            eprintln!("❌ No games found in file");
+                        }
                     } else {
                         eprintln!("❌ No games found in file");
                     }
@@ -323,7 +390,7 @@ fn main() -> io::Result<()> {
         }
         _ => {
             eprintln!("Unknown command: {}", args[1]);
-            eprintln!("Use 'encode', 'test-position', 'test-one-move', 'test-moves', or 'parse'");
+            eprintln!("Use 'encode', 'test-position', 'test-one-move', 'test-moves', 'test-variations', or 'parse'");
             std::process::exit(1);
         }
     }
