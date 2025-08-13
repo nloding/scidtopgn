@@ -495,7 +495,7 @@ fn display_game_boundaries(boundaries: &[(usize, usize)], buffer: &[u8]) {
 
 /// Parse PGN tags and game flags from game data based on SCID Decode function
 /// Reference: scidvspc/src/game.cpp DecodeTags() and Decode() functions
-fn parse_pgn_tags(game_data: &[u8]) -> Result<GameParseState, Box<dyn std::error::Error>> {
+pub fn parse_pgn_tags(game_data: &[u8]) -> Result<GameParseState, Box<dyn std::error::Error>> {
     let mut tags = Vec::new();
     let mut pos = 0;
     

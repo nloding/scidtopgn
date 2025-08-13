@@ -220,11 +220,14 @@ pub struct ChessPosition {
 }
 
 impl ChessPosition {
-    /// Create starting chess position
+    /// Create starting chess position with DYNAMIC piece numbering
     /// 
-    /// Sets up standard initial position with SCID piece numbering:
-    /// White: King=0, Queen=1, Rooks=2/9, Bishops=3/10, Knights=4/11, Pawns=5-8/12-15
-    /// Black: Similar numbering offset (exact mapping determined by analysis)
+    /// This creates the standard chess starting position, but DOES NOT assign
+    /// SCID piece numbers yet. Instead, piece numbers are assigned dynamically
+    /// as moves are encountered during parsing.
+    /// 
+    /// This approach is required because SCID uses its own proprietary piece
+    /// numbering system that must be reverse-engineered from actual game data.
     pub fn starting_position() -> Self {
         let mut position = ChessPosition {
             board: [[None; 8]; 8],
