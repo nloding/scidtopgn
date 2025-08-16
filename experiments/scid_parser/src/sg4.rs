@@ -1,5 +1,25 @@
+// ===============================
+// Step 9: SCID Move Decoding Documentation for Shakmaty Migration
+// This file contains the core logic for parsing SCID .sg4 game files and decoding moves.
+// The following documentation outlines how each field and structure in this file will be mapped to shakmaty types:
+//
+// - DecodedMove: Represents a parsed SCID move. Fields:
+//     - piece_num: Maps to shakmaty::Role (King, Queen, Rook, Bishop, Knight, Pawn)
+//     - move_value: Encodes target square, promotion, castling, etc. Used to determine shakmaty::Move variant
+//     - raw_byte: For debugging, not used in conversion
+//     - interpretation: Human-readable and conversion mapping info
+// - MoveInterpretation: Used to describe how a move should be converted to shakmaty::Move
+// - GameFlags: Used for game-level metadata, e.g., custom start position, promotions
+// - Parsing logic: Will be used by bridge/moves.rs to implement ScidToShakmaty trait
+// - All square encodings (0-63) will be mapped to shakmaty::Square
+// - Promotion types will be mapped to shakmaty::Role
+// - Special moves (castling, en passant) will be mapped to appropriate shakmaty::Move variants
+// - Move validation will be performed using shakmaty position context
+// ===============================
 use crate::utils::*;
 use crate::position::*;
+use crate::bridge::{GameState, PositionContext};
+use shakmaty::Move as ShakmMove;
 use std::fs::File;
 use std::io::Read;
 
@@ -101,45 +121,126 @@ pub struct GameFlags {
 // type Square = u8;  // Disabled to avoid conflict with position::Square
 
 /// Basic move information decoded from SCID binary format
+/// 
+/// This struct represents a fully decoded SCID move that contains all the information
+/// needed for conversion to shakmaty chess moves. The piece_num identifies which piece
+/// is moving (0-15 for pieces on the board), and the move_value contains the piece-specific
+/// encoding for the target square or move type.
+/// 
+/// SHAKMATY CONVERSION PROCESS:
+/// 1. Extract piece role from piece_num (King=0-1, Queen=2-3, Rook=4-7, Bishop=8-11, Knight=12-15, Pawn=varies)
+/// 2. Get current piece position from chess position using piece tracking
+/// 3. Use move_value + interpretation to calculate target square
+/// 4. Detect captures by checking if target square contains opponent piece
+/// 5. Create appropriate shakmaty::Move variant (Normal, Castle, EnPassant)
+/// 
+/// CONVERSION REQUIREMENTS:
+/// - Position context: Needed to find piece locations and detect captures
+/// - Piece tracking: Map piece_num to current board squares
+/// - Move validation: Ensure generated moves are legal in current position
 #[derive(Debug, Clone)]
 pub struct DecodedMove {
+    /// SCID piece number (0-15): identifies which specific piece is moving
+    /// Used to locate the piece on the current board position
     pub piece_num: u8,
+    
+    /// SCID move value (0-15): piece-specific encoding of target square/move type
+    /// Combined with piece type to determine exact move destination
     pub move_value: u8,
+    
+    /// Original raw byte from SCID file: piece_num (high 4 bits) + move_value (low 4 bits)
+    /// Preserved for debugging and validation purposes
     pub raw_byte: u8,
+    
+    /// Interpreted move information based on piece type and structured move data
+    /// Contains human-readable description and shakmaty conversion mapping information
     pub interpretation: MoveInterpretation,
 }
 
 /// Move interpretation based on SCID source code analysis
+/// 
+/// This enum represents the current understanding of SCID move encoding and will be
+/// used as the source data for conversion to shakmaty chess moves. Each variant
+/// contains the information needed to reconstruct the actual chess move.
+/// 
+/// SHAKMATY CONVERSION MAPPING:
+/// - King moves map to shakmaty::Move::Normal or shakmaty::Move::Castle
+/// - Castling (codes 9,10) maps to shakmaty::Move::Castle with king/rook squares
+/// - All other pieces map to shakmaty::Move::Normal with from/to squares
+/// - Pawn promotions map to shakmaty::Move::Normal with promotion field
+/// - En passant captures map to shakmaty::Move::EnPassant
 #[derive(Debug, Clone)]
 pub enum MoveInterpretation {
+    /// King moves: directions 0-8 are normal moves, 9-10 are castling
+    /// SHAKMATY MAPPING: 
+    /// - Normal moves → Move::Normal{role: King, from, to, capture, promotion: None}
+    /// - Castling → Move::Castle{king: from_square, rook: rook_square}
     King {
         direction_code: u8,  // 0-10: directions and castling
         description: String, // Human-readable description
     },
+    /// Queen moves: can be rook-like (rank/file) or diagonal
+    /// SHAKMATY MAPPING: Move::Normal{role: Queen, from, to, capture, promotion: None}
+    /// - Requires position context to determine exact target square
+    /// - May capture opponent pieces (detected from position)
     Queen {
         move_type: String,   // "rook-like" or "diagonal"
         description: String, // Human-readable description
     },
+    /// Rook moves: strictly rank or file movement
+    /// SHAKMATY MAPPING: Move::Normal{role: Rook, from, to, capture, promotion: None}
+    /// - move_value >= 8: vertical move to rank (move_value - 8)
+    /// - move_value < 8: horizontal move to file (move_value)
     Rook {
         target_info: String, // File or rank target
         description: String, // Human-readable description
     },
+    /// Bishop moves: diagonal movement only
+    /// SHAKMATY MAPPING: Move::Normal{role: Bishop, from, to, capture, promotion: None}
+    /// - Target file encoded in lower 3 bits
+    /// - Direction (up-left/down-right vs up-right/down-left) in bit 3
     Bishop {
         direction: String,   // Direction of diagonal move
         description: String, // Human-readable description
     },
+    /// Knight moves: L-shaped patterns
+    /// SHAKMATY MAPPING: Move::Normal{role: Knight, from, to, capture, promotion: None}
+    /// - Uses lookup table of square differences: [-17,-15,-10,-6,6,10,15,17]
+    /// - Extended codes 9-15 for edge cases and special positions
     Knight {
         l_shape_code: u8,    // 1-8: L-shaped move patterns
         description: String, // Human-readable description
     },
+    /// Pawn moves: forward movement, captures, and promotions
+    /// SHAKMATY MAPPING: 
+    /// - Normal move → Move::Normal{role: Pawn, from, to, capture, promotion}
+    /// - En passant → Move::EnPassant{from, to}
+    /// - Promotion specified in promotion field
     Pawn {
         direction: String,   // Forward/capture direction
         promotion: Option<String>, // Promotion piece if any
         description: String, // Human-readable description
     },
+    /// Unknown move encoding - conversion will fail with error
+    /// SHAKMATY MAPPING: Returns ConversionError
     Unknown {
         reason: String,      // Why we couldn't decode it
     },
+}
+
+impl MoveInterpretation {
+    /// Get the description string for this move interpretation
+    pub fn description(&self) -> &str {
+        match self {
+            MoveInterpretation::King { description, .. } => description,
+            MoveInterpretation::Queen { description, .. } => description,
+            MoveInterpretation::Rook { description, .. } => description,
+            MoveInterpretation::Bishop { description, .. } => description,
+            MoveInterpretation::Knight { description, .. } => description,
+            MoveInterpretation::Pawn { description, .. } => description,
+            MoveInterpretation::Unknown { reason } => reason,
+        }
+    }
 }
 
 /// Move/annotation data element from SCID source analysis
@@ -685,6 +786,12 @@ pub fn parse_pgn_tags(game_data: &[u8]) -> Result<GameParseState, Box<dyn std::e
 
 /// Decode King moves based on SCID source code (game.cpp decodeKing function)
 /// Reference: static const int sqdiff[] = { 0, -9, -8, -7, -1, 1, 7, 8, 9, -2, 2 };
+/// 
+/// SHAKMATY CONVERSION NOTES:
+/// - move_value 0-8: Normal king moves → shakmaty::Move::Normal
+/// - move_value 9: Queenside castling → shakmaty::Move::Castle{king: e1/e8, rook: a1/a8}
+/// - move_value 10: Kingside castling → shakmaty::Move::Castle{king: e1/e8, rook: h1/h8}
+/// - Square differences: [0, -9, -8, -7, -1, 1, 7, 8, 9, -2, 2]
 fn decode_king_move(move_value: u8) -> MoveInterpretation {
     // SCID King move lookup table from game.cpp decodeKing()
     let descriptions = [
@@ -1842,24 +1949,24 @@ pub fn test_simple_move_decoding(piece_num: u8, move_value: u8) -> Result<String
 }
 
 
+/*
 /// Parse a single game with position tracking and variation tree support
-pub fn parse_game_with_variation_trees(
+/// TODO: Update this function to use GameState in a future step
+#[allow(dead_code)]
+fn parse_game_with_variation_trees_old(
     game_data: &[u8],
     game_number: usize
 ) -> Result<(VariationTree, Vec<Move>, Vec<String>), String> {
-    // Initialize position and variation tree
-    let mut position = ChessPosition::starting_position();
+    // Initialize GameState and variation tree
+    let mut game_state = GameState::new();
     let mut variation_tree = VariationTree::new();
-    let mut moves = Vec::new();
-    let mut algebraic_notation = Vec::new();
     
     // Parse the game structure first
-    let game_state = parse_pgn_tags(game_data).map_err(|e| e.to_string())?;
+    let parsed_game = parse_pgn_tags(game_data).map_err(|e| e.to_string())?;
     
     println!("🌳 VARIATION-AWARE PARSING: Game {}", game_number);
-    println!("📍 Starting position:");
-    println!("{}", position.display_board());
-    println!("📝 Processing {} elements with variation tracking...", game_state.elements.len());
+    println!("📍 Starting position with ScidPositionTracker");
+    println!("📝 Processing {} elements with variation tracking...", parsed_game.elements.len());
     
     let mut move_count = 0;
     let mut in_variation = false;
@@ -1949,89 +2056,72 @@ pub fn parse_game_with_variation_trees(
     
     Ok((variation_tree, moves, algebraic_notation))
 }
+*/
 
 /// Parse a single game with position tracking - the core of position-aware move decoding
 pub fn parse_game_with_position_tracking(
     game_data: &[u8],
     game_number: usize
-) -> Result<(Vec<Move>, Vec<String>), String> {
-    // Initialize position
-    let mut position = ChessPosition::starting_position();
-    let mut moves = Vec::new();
-    let mut algebraic_notation = Vec::new();
+) -> Result<(Vec<ShakmMove>, Vec<String>), String> {
+    // Initialize GameState with position-aware parsing
+    let mut game_state = GameState::new();
     
     // Parse the game structure first
-    let game_state = parse_pgn_tags(game_data).map_err(|e| e.to_string())?;
+    let parsed_game = parse_pgn_tags(game_data).map_err(|e| e.to_string())?;
     
     println!("🔥 POSITION-AWARE PARSING: Game {}", game_number);
-    println!("📍 Starting position:");
-    println!("{}", position.display_board());
-    println!("📝 Processing {} moves with position tracking...", game_state.elements.len());
+    println!("📍 Starting position with ScidPositionTracker");
+    println!("📝 Processing {} moves with position-aware bridge layer...", parsed_game.elements.len());
     
     let mut move_count = 0;
     
-    // Process each game element with position awareness
-    for (i, element) in game_state.elements.iter().enumerate() {
+    // Process each game element using position-aware GameState
+    for (i, element) in parsed_game.elements.iter().enumerate() {
         match element {
-            GameElement::Move { piece_num, move_value, raw_byte, offset, .. } => {
-                match decode_move_with_position(piece_num, move_value, raw_byte, &position) {
-                    Ok((chess_move, notation)) => {
-                        move_count += 1;
-                        
-                        // Show first few moves with detailed analysis, plus any potential castling moves
-                        if move_count <= 5 || chess_move.is_castling {
-                            println!("  Move {}: P{} V{} -> {}", move_count, piece_num, move_value, notation);
-                            println!("    From: {} To: {}", chess_move.from, chess_move.to);
-                            println!("    Piece: {:?} {:?}", chess_move.piece.color, chess_move.piece.piece_type);
-                            if chess_move.is_castling {
-                                println!("    🏰 CASTLING DETECTED!");
+            GameElement::Move { piece_num, move_value, raw_byte, offset, decoded } => {
+                if let Some(decoded_move) = decoded {
+                    match game_state.play_scid_move(decoded_move) {
+                        Ok(()) => {
+                            move_count += 1;
+                            
+                            // Show first few moves with position-aware analysis
+                            if move_count <= 5 {
+                                println!("  Move {}: P{} V{} -> {}", 
+                                    move_count, piece_num, move_value, 
+                                    decoded_move.interpretation.description());
+                                println!("    Position-aware parsing via ScidPositionTracker");
                             }
                         }
-                        
-                        // Apply move to position
-                        match position.apply_move(&chess_move) {
-                            Ok(()) => {
-                                moves.push(chess_move);
-                                algebraic_notation.push(notation);
-                            }
-                            Err(e) => {
-                                println!("❌ FAILED TO APPLY MOVE {}:", move_count);
-                                println!("   Move: P{} V{} -> {}", piece_num, move_value, notation);
-                                println!("   From: {} To: {}", chess_move.from, chess_move.to);
-                                println!("   Piece: {:?} {:?}", chess_move.piece.color, chess_move.piece.piece_type);
-                                println!("   Is castling: {}", chess_move.is_castling);
-                                return Err(format!("Failed to apply move {}: {}", move_count, e));
-                            }
+                        Err(e) => {
+                            println!("❌ FAILED TO APPLY SCID MOVE {}:", move_count + 1);
+                            println!("   Move: P{} V{} -> {}", piece_num, move_value, 
+                                decoded_move.interpretation.description());
+                            return Err(format!("Failed to apply SCID move {}: {}", move_count + 1, e));
                         }
                     }
-                    Err(e) => {
-                        // For now, continue on errors but log them with more detail
-                        let actual_piece_id = map_scid_piece_number_to_actual(*piece_num, position.to_move).unwrap_or(*piece_num);
-                        let piece_info = position.get_piece_by_number(actual_piece_id)
-                            .map(|p| format!("{:?} {:?}", p.color, p.piece_type))
-                            .unwrap_or_else(|| "Unknown".to_string());
-                        println!("  ⚠️  Move {}: P{} V{} (actual piece: {}) - Error: {}", 
-                            move_count + 1, piece_num, move_value, piece_info, e);
-                        move_count += 1;
-                        
-                        // Skip this move but continue parsing
+                } else {
+                        // No decoded move available, skip this element
+                        println!("  ⚠️  Move {}: P{} V{} - No decoded move available", 
+                            move_count + 1, piece_num, move_value);
                         continue;
                     }
                 }
-            }
-            GameElement::GameEnd { .. } => {
-                break; // End of game
-            }
-            _ => {
-                // Handle other elements (NAGs, comments, variations) later
-                continue;
-            }
+                GameElement::GameEnd { .. } => {
+                    break; // End of game
+                }
+                _ => {
+                    // Handle other elements (NAGs, comments, variations) later
+                    continue;
+                }
         }
     }
     
+    // Get the move history and SAN notation from GameState
+    let moves = game_state.move_history().to_vec();
+    let algebraic_notation = game_state.san_moves().to_vec();
+    
     println!("✅ Successfully processed {} moves", moves.len());
-    println!("📍 Final position:");
-    println!("{}", position.display_board());
+    println!("📍 Final position: {}", game_state.fen());
     
     Ok((moves, algebraic_notation))
 }

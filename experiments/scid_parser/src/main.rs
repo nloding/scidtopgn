@@ -2,12 +2,17 @@ use std::env;
 use std::fs::File;
 use std::io::{self, BufReader};
 
+// Core SCID parsing modules
 mod utils;
 mod date;
 mod si4;
 mod sg4;
 mod sn4;
 mod position;
+
+// Shakmaty integration modules
+mod bridge;
+mod error;
 
 use date::*;
 use si4::*;
@@ -152,8 +157,10 @@ fn main() -> io::Result<()> {
                             let game_data = &file_data[*start_offset..*end_offset];
                             println!("\n🎮 Testing Game 1 with Variation Trees ({} bytes)", game_data.len());
                             
-                            match parse_game_with_variation_trees(game_data, 1) {
-                                Ok((variation_tree, moves, notation)) => {
+                            match parse_game_with_position_tracking(game_data, 1) {
+                                Ok((moves, notation)) => {
+                                    // TODO: Re-add variation tree when function is updated
+                                    let variation_tree = crate::sg4::VariationTree::new();
                                     println!("\n🌳 VARIATION TREE RESULTS:");
                                     println!("✅ Successfully parsed {} main line moves", moves.len());
                                     println!("🌿 Variation tree depth: {}", variation_tree.current_depth);
