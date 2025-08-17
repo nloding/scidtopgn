@@ -10,7 +10,6 @@ pub mod date;
 pub mod si4;
 pub mod sg4;
 pub mod sn4;
-pub mod position;
 
 // Shakmaty integration modules
 pub mod bridge;

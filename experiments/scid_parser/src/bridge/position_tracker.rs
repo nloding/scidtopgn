@@ -181,10 +181,11 @@ impl ScidPositionTracker {
             }
         }
         
-        // Check for en passant (pawn captures to empty square)
+        // Check for en passant using SCID move data
         if role == Role::Pawn {
-            if let Some(ep_move) = self.check_en_passant_move(from, to)? {
-                return Ok(ep_move);
+            // Check for en passant
+            if let crate::sg4::MoveInterpretation::Pawn { is_en_passant: Some(true), .. } = &scid_move.interpretation {
+                return Ok(Move::EnPassant { from, to });
             }
         }
         
@@ -192,13 +193,24 @@ impl ScidPositionTracker {
         let capture = self.current_position.board().piece_at(to).map(|p| p.role);
         
         // Handle pawn promotion
-        let promotion = if role == Role::Pawn && (to.rank() == Rank::First || to.rank() == Rank::Eighth) {
-            // Extract promotion piece from SCID move data if available
-            // For now, default to queen (most common)
-            Some(Role::Queen)
-        } else {
-            None
-        };
+        if role == Role::Pawn {
+            // Check if this is a promotion move (reaching 8th/1st rank)
+            let is_promotion = (self.to_move == Color::White && to.rank() == shakmaty::Rank::Eighth) ||
+                              (self.to_move == Color::Black && to.rank() == shakmaty::Rank::First);
+            
+            if is_promotion {
+                let promotion_role = extract_promotion_from_scid_move(scid_move)?;
+                return Ok(Move::Normal {
+                    role: Role::Pawn,
+                    from,
+                    to,
+                    capture: self.current_position.board().piece_at(to).map(|p| p.role),
+                    promotion: Some(promotion_role),
+                });
+            }
+        }
+        
+        let promotion = None;
         
         Ok(Move::Normal {
             role,
@@ -219,15 +231,49 @@ impl ScidPositionTracker {
             let queen_side_target = if self.to_move == Color::White { Square::C1 } else { Square::C8 };
             
             if to == king_side_target {
+                // Kingside castling - verify rook can castle
                 let rook_square = if self.to_move == Color::White { Square::H1 } else { Square::H8 };
+                self.verify_castling_legality(from, rook_square)?;
                 return Ok(Some(Move::Castle { king: from, rook: rook_square }));
             } else if to == queen_side_target {
+                // Queenside castling - verify rook can castle
                 let rook_square = if self.to_move == Color::White { Square::A1 } else { Square::A8 };
+                self.verify_castling_legality(from, rook_square)?;
                 return Ok(Some(Move::Castle { king: from, rook: rook_square }));
             }
         }
         
         Ok(None)
+    }
+    
+    /// Verify castling legality by checking rook presence and position
+    fn verify_castling_legality(&self, king_square: Square, rook_square: Square) -> Result<()> {
+        // Verify rook is present at expected square
+        let rook_piece = self.current_position.board().piece_at(rook_square)
+            .ok_or_else(|| ScidError::conversion_error(format!("No rook found at {} for castling", rook_square)))?;
+        
+        // Verify it's actually a rook of the correct color
+        if rook_piece.role != Role::Rook {
+            return Err(ScidError::conversion_error(format!("Expected rook at {}, found {:?}", rook_square, rook_piece.role)));
+        }
+        
+        if rook_piece.color != self.to_move {
+            return Err(ScidError::conversion_error(format!("Rook at {} belongs to {:?}, but it's {:?} to move", rook_square, rook_piece.color, self.to_move)));
+        }
+        
+        // Additional verification: ensure king is on correct square
+        let king_piece = self.current_position.board().piece_at(king_square)
+            .ok_or_else(|| ScidError::conversion_error(format!("No king found at {} for castling", king_square)))?;
+            
+        if king_piece.role != Role::King {
+            return Err(ScidError::conversion_error(format!("Expected king at {}, found {:?}", king_square, king_piece.role)));
+        }
+        
+        if king_piece.color != self.to_move {
+            return Err(ScidError::conversion_error(format!("King at {} belongs to {:?}, but it's {:?} to move", king_square, king_piece.color, self.to_move)));
+        }
+        
+        Ok(())
     }
     
     /// Check if pawn move is en passant
@@ -430,6 +476,24 @@ impl ScidPositionTracker {
     }
 }
 
+/// Extract promotion piece from SCID move data
+fn extract_promotion_from_scid_move(scid_move: &DecodedMove) -> Result<Role> {
+    match &scid_move.interpretation {
+        crate::sg4::MoveInterpretation::Pawn { promotion, .. } => {
+            promotion.as_ref()
+                .and_then(|p| match p.as_str() {
+                    "Q" | "Queen" => Some(Role::Queen),
+                    "R" | "Rook" => Some(Role::Rook),
+                    "B" | "Bishop" => Some(Role::Bishop),
+                    "N" | "Knight" => Some(Role::Knight),
+                    _ => None,
+                })
+                .ok_or_else(|| ScidError::conversion_error("Invalid promotion piece"))
+        }
+        _ => Err(ScidError::conversion_error("Not a pawn move")),
+    }
+}
+
 impl Default for ScidPositionTracker {
     fn default() -> Self {
         Self::new()
@@ -507,6 +571,7 @@ mod tests {
                 direction: "forward".to_string(),
                 promotion: None,
                 description: "Pawn move forward A2-A3".to_string(),
+                is_en_passant: Some(false),
             },
         };
         
@@ -598,5 +663,39 @@ mod tests {
         
         // After any future move application, piece lists should be rebuilt
         // This test validates the infrastructure is in place
+    }
+    
+    #[test]
+    fn test_castling_verification() {
+        // Test castling verification functionality according to Edge Case Remediation Plan Phase 4 Step 4.1
+        let tracker = ScidPositionTracker::new();
+        
+        // Test successful WHITE castling verification from starting position (White to move)
+        // White kingside castling (E1 -> G1, H1 rook)
+        let result = tracker.verify_castling_legality(Square::E1, Square::H1);
+        assert!(result.is_ok(), "White kingside castling verification should succeed in starting position");
+        
+        // White queenside castling (E1 -> C1, A1 rook) 
+        let result = tracker.verify_castling_legality(Square::E1, Square::A1);
+        assert!(result.is_ok(), "White queenside castling verification should succeed in starting position");
+        
+        // Test failure cases for BLACK pieces (it's White's turn, so Black pieces should fail)
+        // Black pieces should fail because it's White to move
+        let result = tracker.verify_castling_legality(Square::E8, Square::H8);
+        assert!(result.is_err(), "Black kingside castling verification should fail when it's White to move");
+        
+        let result = tracker.verify_castling_legality(Square::E8, Square::A8);
+        assert!(result.is_err(), "Black queenside castling verification should fail when it's White to move");
+        
+        // Test other failure cases
+        // Try to castle with non-existent rook
+        let result = tracker.verify_castling_legality(Square::E1, Square::E2);
+        assert!(result.is_err(), "Castling verification should fail when no rook present");
+        
+        // Try to castle with wrong piece (pawn instead of rook)
+        let result = tracker.verify_castling_legality(Square::E1, Square::A2);
+        assert!(result.is_err(), "Castling verification should fail when pawn found instead of rook");
+        
+        println!("✅ Castling verification test passed - Phase 4 Step 4.1 implemented correctly");
     }
 }

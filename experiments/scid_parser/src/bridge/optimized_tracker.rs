@@ -7,7 +7,7 @@
 // Based on Phase 5 Step 5.1 of the Comprehensive Remediation Plan.
 
 use lru::LruCache;
-use object_pool::Pool;
+// use object_pool::Pool;  // Commented out - unused object pools
 use shakmaty::{Chess, Move, Square, Position};
 use crate::error::{Result, ScidError};
 use crate::sg4::DecodedMove;
@@ -33,11 +33,9 @@ pub struct OptimizedPositionTracker {
     /// Reusable move buffer to avoid allocations during game parsing
     move_buffer: Vec<Move>,
     
-    /// Object pool for piece lists (Vec<Square>) to reuse allocations
-    piece_list_pool: Pool<Vec<Square>>,
-    
-    /// Object pool for SAN notation strings to reuse string allocations
-    san_pool: Pool<Vec<String>>,
+    // COMMENTED OUT: Unused object pools (TODO: Implement or remove in future)
+    // piece_list_pool: Pool<Vec<Square>>,
+    // san_pool: Pool<Vec<String>>,
     
     /// Current position being tracked
     current_position: Chess,
@@ -67,8 +65,8 @@ impl OptimizedPositionTracker {
         Self {
             position_cache: LruCache::new(std::num::NonZeroUsize::new(cache_size).unwrap()),
             move_buffer: Vec::with_capacity(200), // Pre-allocate for typical game length
-            piece_list_pool: Pool::new(pool_size, || Vec::with_capacity(16)), // 16 pieces per side max
-            san_pool: Pool::new(pool_size, || Vec::with_capacity(200)), // Typical game length
+            // piece_list_pool: Pool::new(pool_size, || Vec::with_capacity(16)), // Commented out - unused
+            // san_pool: Pool::new(pool_size, || Vec::with_capacity(200)), // Commented out - unused
             current_position: Chess::default(),
             move_history: Vec::with_capacity(200),
             san_history: Vec::with_capacity(200),

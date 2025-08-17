@@ -4,7 +4,7 @@
 // to shakmaty chess types. The bridge pattern allows the SCID parser to 
 // focus on binary format parsing while delegating chess logic to shakmaty.
 
-use shakmaty::{Chess, Position, Move};
+use shakmaty::{Chess, Move};
 use crate::error::Result;
 
 pub mod moves;
@@ -18,7 +18,7 @@ pub mod parallel_processor;
 // Re-export key types for easier access
 pub use moves::*;
 pub use position::*;
-pub use notation::*;
+// pub use notation::*;  // Commented out - no public interface needed
 pub use position_tracker::*;
 pub use validation::*;
 pub use optimized_tracker::*;

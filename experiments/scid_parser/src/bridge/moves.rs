@@ -8,6 +8,8 @@ fn parse_promotion_piece_scid(promo: &str) -> Result<Role> {
         _ => Err(ScidError::conversion_error(format!("Unknown promotion piece: {}", promo))),
     }
 }
+// COMMENTED OUT: Unused function superseded by position-aware piece lookup
+/*
 /// Helper function to map SCID piece number to shakmaty Role
 /// SCID piece_num values:
 ///   0-1: King
@@ -26,6 +28,7 @@ fn scid_piece_num_to_role(piece_num: u8) -> Option<Role> {
         _ => Some(Role::Pawn),
     }
 }
+*/
 /// Helper function to calculate target square from a starting square and a difference
 /// Used for king, knight, and pawn moves (and others as needed)
 fn calculate_target_square_scid(from: Square, diff: i32) -> Result<Square> {

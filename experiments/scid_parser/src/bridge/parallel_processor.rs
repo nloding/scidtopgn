@@ -11,8 +11,8 @@ use std::thread;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use crate::error::{Result, ScidError};
-use crate::bridge::{OptimizedPositionTracker, GameState, GameMetadata, PositionContext};
-use crate::sg4::DecodedMove;
+use crate::bridge::{OptimizedPositionTracker, GameState, GameMetadata};
+// use crate::sg4::DecodedMove;  // Commented out - unused import
 
 /// Configuration for parallel game processing
 #[derive(Debug, Clone)]

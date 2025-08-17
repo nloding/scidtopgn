@@ -49,7 +49,7 @@ impl GameState {
 // game state using shakmaty's notation capabilities. It converts game history
 // and metadata into proper PGN format suitable for export.
 
-use shakmaty::{Chess, Move, Position};
+// use shakmaty::{Chess, Move, Position};  // Commented out - unused imports
 // Note: GameState import will be added when implementing PGN generation
 // use crate::bridge::GameState;
 
