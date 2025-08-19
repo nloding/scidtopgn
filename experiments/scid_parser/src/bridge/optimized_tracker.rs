@@ -61,7 +61,7 @@ impl OptimizedPositionTracker {
     /// # Parameters
     /// - `cache_size`: Maximum number of positions to cache (suggested: 10000+ for large databases)
     /// - `pool_size`: Size of object pools (suggested: 100+ for concurrent processing)
-    pub fn new(cache_size: usize, pool_size: usize) -> Self {
+    pub fn new(cache_size: usize, _pool_size: usize) -> Self {
         Self {
             position_cache: LruCache::new(std::num::NonZeroUsize::new(cache_size).unwrap()),
             move_buffer: Vec::with_capacity(200), // Pre-allocate for typical game length
@@ -227,7 +227,7 @@ impl OptimizedPositionTracker {
     }
     
     /// Process a single game with the optimized tracker
-    fn process_single_game(&mut self, game_data: &[u8], game_id: GameId) -> Result<ProcessedGameResult> {
+    fn process_single_game(&mut self, _game_data: &[u8], game_id: GameId) -> Result<ProcessedGameResult> {
         // Parse the game using existing SG4 parsing logic
         // This is a simplified version - in practice, this would call the actual SG4 parser
         

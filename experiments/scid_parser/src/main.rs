@@ -1,3 +1,6 @@
+// Allow dead code for development and debugging utilities
+#![allow(dead_code)]
+
 use std::env;
 use std::fs::File;
 use std::io::{self, BufReader};
@@ -48,7 +51,7 @@ fn main() -> io::Result<()> {
         }
         "test-one-move" => {
             println!("🧪 Testing single move decoding with position:");
-            let mut position = shakmaty::Chess::default();
+            let position = shakmaty::Chess::default();
             println!("📍 Starting position:");
             println!("{}", position.board());
             

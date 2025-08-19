@@ -16,13 +16,13 @@ pub mod optimized_tracker;
 pub mod parallel_processor;
 
 // Re-export key types for easier access
-pub use moves::*;
+
 pub use position::*;
 // pub use notation::*;  // Commented out - no public interface needed
 pub use position_tracker::*;
 pub use validation::*;
 pub use optimized_tracker::*;
-pub use parallel_processor::*;
+
 
 /// Core trait for converting SCID data to shakmaty types
 /// 

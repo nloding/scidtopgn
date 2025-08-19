@@ -101,7 +101,7 @@ fn convert_king_move(direction_code: u8, piece_num: u8, position: &Chess) -> Res
         // Castling moves
         9 => {
             // Queenside castling
-            let (king_to, rook_from) = match from_square {
+            let (_king_to, rook_from) = match from_square {
                 square if square == Square::E1 => (Square::C1, Square::A1),
                 square if square == Square::E8 => (Square::C8, Square::A8),
                 _ => return Err(ScidError::conversion_error("King not on home rank for queenside castling")),
@@ -110,7 +110,7 @@ fn convert_king_move(direction_code: u8, piece_num: u8, position: &Chess) -> Res
         }
         10 => {
             // Kingside castling  
-            let (king_to, rook_from) = match from_square {
+            let (_king_to, rook_from) = match from_square {
                 square if square == Square::E1 => (Square::G1, Square::H1),
                 square if square == Square::E8 => (Square::G8, Square::H8),
                 _ => return Err(ScidError::conversion_error("King not on home rank for kingside castling")),
@@ -269,7 +269,7 @@ fn convert_knight_move(move_value: u8, piece_num: u8, position: &Chess) -> Resul
 }
 
 /// Convert SCID pawn moves to shakmaty moves
-fn convert_pawn_move(move_value: u8, piece_num: u8, promotion: Option<&str>, position: &Chess) -> Result<Move> {
+fn convert_pawn_move(_move_value: u8, piece_num: u8, promotion: Option<&str>, position: &Chess) -> Result<Move> {
     let from_square = find_piece_square(piece_num, Role::Pawn, position)?;
     
     // Determine pawn color from current position

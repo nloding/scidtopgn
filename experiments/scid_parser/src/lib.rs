@@ -4,6 +4,9 @@
 // and converting them to standard formats like PGN. It includes a bridge layer
 // for integrating with the shakmaty chess library.
 
+// Allow dead code for development and debugging utilities
+#![allow(dead_code)]
+
 // Core SCID parsing modules
 pub mod utils;
 pub mod date;

@@ -396,7 +396,7 @@ impl ParallelGameProcessor {
     /// Common implementation for game parsing
     fn parse_game_with_tracker_impl(
         tracker: &mut OptimizedPositionTracker,
-        game_data: &[u8],
+        _game_data: &[u8],
         metadata: Option<&GameMetadata>,
     ) -> Result<(GameState, GameMetadata)> {
         // Reset tracker for new game

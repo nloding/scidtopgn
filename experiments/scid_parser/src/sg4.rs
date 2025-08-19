@@ -413,6 +413,7 @@ pub struct GameParseState {
     pub moves_start_offset: usize,
 }
 
+#[allow(dead_code)]
 pub fn display_sg4_structure() {
     println!("\n🎯 SCID .sg4 Game File Structure Analysis");
     println!("========================================");
@@ -545,6 +546,7 @@ pub fn find_game_boundaries(buffer: &[u8]) -> Vec<(usize, usize)> {
     boundaries
 }
 
+#[allow(dead_code)]
 fn display_game_boundaries(boundaries: &[(usize, usize)], buffer: &[u8]) {
     println!("🔍 Game Boundary Detection Results:");
     println!("┌──────────┬─────────────┬─────────────┬─────────────┐");
@@ -580,7 +582,7 @@ fn display_game_boundaries(boundaries: &[(usize, usize)], buffer: &[u8]) {
             println!("   📝 Parsing PGN tags, flags, and game elements:");
             let game_data = &buffer[*start..*end];
             match parse_pgn_tags(game_data) {
-                Ok(game_state) => {
+                Ok(_game_state) => {
                     // display_pgn_tags(&game_state.tags);  // Function removed
                     // display_game_flags(&game_state.flags, game_state.flags_offset + start);  // Function removed
                     // display_game_elements(&game_state.elements, *start);  // Function removed
@@ -2222,9 +2224,9 @@ pub fn parse_game_with_position_tracking(
     let mut move_count = 0;
     
     // Process each game element using position-aware GameState
-    for (i, element) in parsed_game.elements.iter().enumerate() {
+    for (_i, element) in parsed_game.elements.iter().enumerate() {
         match element {
-            GameElement::Move { piece_num, move_value, raw_byte, offset, decoded } => {
+            GameElement::Move { piece_num, move_value, raw_byte: _, offset: _, decoded } => {
                 if let Some(decoded_move) = decoded {
                     match game_state.play_scid_move(decoded_move) {
                         Ok(()) => {

@@ -276,7 +276,8 @@ impl ScidPositionTracker {
         Ok(())
     }
     
-    /// Check if pawn move is en passant
+    /// Check if pawn move is en passant (legacy heuristic method - replaced by SCID data)
+    #[allow(dead_code)]
     fn check_en_passant_move(&self, from: Square, to: Square) -> Result<Option<Move>> {
         // Check if this is a diagonal pawn move to an empty square
         if self.current_position.board().piece_at(to).is_none() {
@@ -343,6 +344,114 @@ impl ScidPositionTracker {
     /// Get move history as shakmaty Moves
     pub fn move_history(&self) -> &[Move] {
         &self.move_history
+    }
+    
+    /// Returns the SCID-style piece list for the given color in the current position.
+    /// The order is: King, Queen, Rooks (Q-side, K-side), Bishops (Q-side, K-side), Knights (Q-side, K-side), Pawns (a-file to h-file)
+    pub fn scid_piece_list(&self, color: Color) -> Vec<Square> {
+        let board = self.current_position.board();
+        let mut list = Vec::with_capacity(16);
+
+        // King
+        for sq in Square::ALL {
+            if let Some(piece) = board.piece_at(sq) {
+                if piece.color == color && piece.role == Role::King {
+                    list.push(sq);
+                    break;
+                }
+            }
+        }
+
+        // Queen
+        for sq in Square::ALL {
+            if let Some(piece) = board.piece_at(sq) {
+                if piece.color == color && piece.role == Role::Queen {
+                    list.push(sq);
+                    break;
+                }
+            }
+        }
+
+        // Rooks: Queenside (a-file), then Kingside (h-file)
+        let mut rooks = vec![];
+        for sq in Square::ALL {
+            if let Some(piece) = board.piece_at(sq) {
+                if piece.color == color && piece.role == Role::Rook {
+                    rooks.push(sq);
+                }
+            }
+        }
+        rooks.sort_by_key(|sq| sq.file() as u8);
+        if let Some(qs_rook) = rooks.get(0) { list.push(*qs_rook); }
+        if let Some(ks_rook) = rooks.get(1) { list.push(*ks_rook); }
+
+        // Bishops: Queenside (c/f), then Kingside (f/c)
+        let mut bishops = vec![];
+        for sq in Square::ALL {
+            if let Some(piece) = board.piece_at(sq) {
+                if piece.color == color && piece.role == Role::Bishop {
+                    bishops.push(sq);
+                }
+            }
+        }
+        bishops.sort_by_key(|sq| sq.file() as u8);
+        if let Some(qs_bishop) = bishops.get(0) { list.push(*qs_bishop); }
+        if let Some(ks_bishop) = bishops.get(1) { list.push(*ks_bishop); }
+
+        // Knights: Queenside (b/g), then Kingside (g/b)
+        let mut knights = vec![];
+        for sq in Square::ALL {
+            if let Some(piece) = board.piece_at(sq) {
+                if piece.color == color && piece.role == Role::Knight {
+                    knights.push(sq);
+                }
+            }
+        }
+        knights.sort_by_key(|sq| sq.file() as u8);
+        if let Some(qs_knight) = knights.get(0) { list.push(*qs_knight); }
+        if let Some(ks_knight) = knights.get(1) { list.push(*ks_knight); }
+
+        // Pawns: a-file to h-file
+        let mut pawns = vec![];
+        for sq in Square::ALL {
+            if let Some(piece) = board.piece_at(sq) {
+                if piece.color == color && piece.role == Role::Pawn {
+                    pawns.push(sq);
+                }
+            }
+        }
+        pawns.sort_by_key(|sq| sq.file() as u8);
+        for sq in pawns.iter().take(8) {
+            list.push(*sq);
+        }
+
+        list
+    }
+
+    /// Returns the SCID-style piece lists for both colors in the current position.
+    pub fn scid_piece_lists(&self) -> (Vec<Square>, Vec<Square>) {
+        (self.scid_piece_list(Color::White), self.scid_piece_list(Color::Black))
+    }
+
+    /// Decodes a SCID move byte using the current SCID piece list and Shakmaty position.
+    /// Returns the corresponding Shakmaty move if found.
+    pub fn decode_scid_move(&self, color: Color, move_byte: u8) -> Option<Move> {
+        let piece_index = (move_byte >> 4) as usize;
+        let move_value = move_byte & 0xF;
+        let piece_list = match color {
+            Color::White => self.scid_piece_list(Color::White),
+            Color::Black => self.scid_piece_list(Color::Black),
+        };
+        if piece_index >= piece_list.len() {
+            return None;
+        }
+        let from_sq = piece_list[piece_index];
+        let legals = self.current_position.legal_moves();
+        let mut candidate_moves: Vec<_> = legals.into_iter().filter(|m| m.from() == Some(from_sq)).collect();
+        if move_value as usize >= candidate_moves.len() {
+            return None;
+        }
+        candidate_moves.get(move_value as usize).cloned()
     }
 }
 

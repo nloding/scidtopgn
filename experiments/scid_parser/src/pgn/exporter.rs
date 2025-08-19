@@ -10,6 +10,7 @@ pub struct PgnExporter {
     /// Whether to validate moves before export
     validate_moves: bool,
     /// Whether to include comments and variations (future enhancement)
+    #[allow(dead_code)]
     include_annotations: bool,
 }
 
