@@ -26,3 +26,4 @@ target
 .crush/
 
 scidvspc/
+.ignore/
