@@ -162,9 +162,113 @@ fn parse_scid_database_clean(base_path: &str) {
                 }
             }
             println!("└─────────────────────────┴─────────────────────────────────────────────────┘");
+            
+            println!();
+            
+            // 5. Individual Games Display
+            display_games(&si4_path, &file_data, games);
         }
         Err(e) => {
             println!("❌ Could not read SG4 file: {}", e);
         }
+    }
+}
+
+/// Display individual games with metadata and moves
+fn display_games(si4_path: &str, sg4_data: &[u8], games: Vec<(usize, usize)>) {
+    // Parse SI4 index file to get game metadata
+    let mut si4_reader = match File::open(si4_path) {
+        Ok(file) => BufReader::new(file),
+        Err(e) => {
+            println!("❌ Could not open SI4 file for game metadata: {}", e);
+            return;
+        }
+    };
+    
+    // Skip SI4 header
+    if let Err(e) = parse_header(&mut si4_reader) {
+        println!("❌ Could not parse SI4 header: {}", e);
+        return;
+    }
+    
+    // Display each game
+    for (game_num, (start_offset, end_offset)) in games.iter().enumerate() {
+        println!("GAME {} DETAILS", game_num + 1);
+        
+        // Get game metadata from SI4 index
+        let game_index = match parse_game_index(&mut si4_reader) {
+            Ok(index) => index,
+            Err(e) => {
+                println!("❌ Could not parse game {} index: {}", game_num + 1, e);
+                continue;
+            }
+        };
+        
+        // Extract game data from SG4
+        let game_data = &sg4_data[*start_offset..*end_offset];
+        
+        // Parse game content
+        let parsed_game = match parse_pgn_tags(game_data) {
+            Ok(game) => game,
+            Err(e) => {
+                println!("❌ Could not parse game {} content: {}", game_num + 1, e);
+                continue;
+            }
+        };
+        
+        // Display game table with dynamic width
+        println!("┌─────────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐");
+        println!("│ Field                   │ Value                                                                                                                                                                                        │");
+        println!("├─────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤");
+        
+        // Game metadata from SI4
+        println!("│ Game Number             │ {} │", game_num + 1);
+        println!("│ Offset                  │ {} │", game_index.offset);
+        println!("│ Length                  │ {} bytes │", game_index.length);
+        println!("│ White Player ID         │ {} │", game_index.white_id);
+        println!("│ Black Player ID         │ {} │", game_index.black_id);
+        println!("│ Event ID                │ {} │", game_index.event_id);
+        println!("│ Site ID                 │ {} │", game_index.site_id);
+        println!("│ Round ID                │ {} │", game_index.round_id);
+        println!("│ Date                    │ {}.{:02}.{:02} │", game_index.year, game_index.month, game_index.day);
+        
+        let result_str = match game_index.result {
+            0 => "*",
+            1 => "1-0",
+            2 => "0-1", 
+            3 => "1/2-1/2",
+            _ => "Unknown",
+        };
+        println!("│ Result                  │ {} │", result_str);
+        println!("│ ECO Code                │ {} │", game_index.eco);
+        println!("│ White ELO               │ {} │", game_index.white_elo);
+        println!("│ Black ELO               │ {} │", game_index.black_elo);
+        println!("│ Flags                   │ {} (0x{:04x}) │", game_index.flags, game_index.flags);
+        println!("│ Half Moves              │ {} │", game_index.num_half_moves);
+        
+        // Game content from SG4
+        println!("│ PGN Tags                │ {} │", parsed_game.tags.len());
+        println!("│ Game Elements           │ {} │", parsed_game.elements.len());
+        
+        // Extract and display moves
+        let mut move_count = 0;
+        for element in &parsed_game.elements {
+            if let GameElement::Move { piece_num, move_value, decoded, .. } = element {
+                move_count += 1;
+                
+                let move_description = if let Some(decoded_move) = decoded {
+                    decoded_move.interpretation.description().to_string()
+                } else {
+                    format!("P{} V{} (undecoded)", piece_num, move_value)
+                };
+                
+                println!("│ Move {}                  │ {} │", 
+                    move_count, 
+                    move_description);
+            }
+        }
+        
+        println!("└─────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘");
+        println!();
     }
 }
