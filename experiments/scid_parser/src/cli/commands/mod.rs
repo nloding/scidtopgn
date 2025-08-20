@@ -1,5 +1,6 @@
 // Command module exports
 pub mod parse;
+pub mod parse_position;
 pub mod encode;
 pub mod format;
 pub mod test_position;

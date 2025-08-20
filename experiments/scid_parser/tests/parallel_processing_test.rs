@@ -3,7 +3,8 @@
 // This test demonstrates the parallel game processing capabilities
 // for large SCID databases using std::thread.
 
-use scid_parser::bridge::{ParallelGameProcessor, ParallelProcessingConfig, GameMetadata};
+use scid_parser::bridge::parallel_processor::{ParallelGameProcessor, ParallelProcessingConfig};
+use scid_parser::bridge::GameMetadata;
 use std::time::Instant;
 
 #[test]

@@ -83,6 +83,20 @@ pub fn run() -> io::Result<()> {
                 std::process::exit(1);
             }
         }
+        "parse-position" => {
+            if args.len() != 3 {
+                eprintln!("Usage: {} parse-position <base_path>", args[0]);
+                eprintln!("Example: {} parse-position /path/to/database", args[0]);
+                eprintln!("Note: Uses position-aware SCID move decoding");
+                std::process::exit(1);
+            }
+            
+            let base_path = &args[2];
+            if let Err(e) = crate::cli::commands::parse_position::execute(base_path) {
+                eprintln!("Parse-position command failed: {}", e);
+                std::process::exit(1);
+            }
+        }
         "format" => {
             if let Err(e) = crate::cli::commands::format::execute() {
                 eprintln!("Format command failed: {}", e);

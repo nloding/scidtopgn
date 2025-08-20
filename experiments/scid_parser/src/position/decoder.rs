@@ -1,0 +1,288 @@
+// Main move decoder - replicates SCID's decodeMove function
+// From scidvspc/src/game.cpp decodeMove()
+
+use crate::position::{ScidPosition, ScidMove, PieceType, Square, Color};
+
+/// Main move decoder - replicates SCID's decodeMove function
+/// From scidvspc/src/game.cpp decodeMove()
+pub fn decode_move(
+    position: &ScidPosition, 
+    move_byte: u8
+) -> Result<ScidMove, String> {
+    // Step 1: Extract piece number and move value
+    // From SCID: pieceNum = (val >> 4)
+    let piece_num = (move_byte >> 4) as usize;
+    let move_value = move_byte & 0x0F;
+    
+    // Step 2: Get piece location from position
+    // From SCID: sqList = pos->GetList(pos->GetToMove())
+    //           sm->from = sqList[sm->pieceNum]
+    let piece_list = position.piece_list(position.to_move);
+    if piece_num >= 16 {
+        return Err(format!("Invalid piece number: {}", piece_num));
+    }
+    let from_square = piece_list[piece_num];
+    
+    // Step 3: Get piece type from board
+    // From SCID: sm->movingPiece = board[sm->from]
+    let piece_type = position.piece_at(from_square)
+        .ok_or("No piece at from square")?;
+    
+    // Step 4: Route to piece-specific decoder
+    // From SCID: switch (piece_Type(sm->movingPiece))
+    let mut scid_move = ScidMove {
+        from: from_square,
+        to: from_square, // Will be set by piece decoder
+        moving_piece: piece_type,
+        captured_piece: PieceType::Empty,
+        promote: PieceType::Empty,
+        piece_num: piece_num as u8,
+    };
+    
+    match piece_type {
+        PieceType::Pawn => decode_pawn(move_value, &mut scid_move, position.to_move)?,
+        PieceType::Knight => decode_knight(move_value, &mut scid_move)?,
+        PieceType::Rook => decode_rook(move_value, &mut scid_move)?,
+        PieceType::Bishop => decode_bishop(move_value, &mut scid_move)?,
+        PieceType::King => decode_king(move_value, &mut scid_move)?,
+        PieceType::Queen => decode_queen(move_value, &mut scid_move)?,
+        _ => return Err(format!("Invalid piece type: {:?}", piece_type)),
+    }
+    
+    // Step 5: Set captured piece if target square occupied
+    if let Some(captured) = position.piece_at(scid_move.to) {
+        scid_move.captured_piece = captured;
+    }
+    
+    Ok(scid_move)
+}
+
+/// Pawn move decoder - exact copy of SCID's decodePawn function
+/// From scidvspc/src/game.cpp decodePawn()
+pub fn decode_pawn(
+    move_value: u8, 
+    scid_move: &mut ScidMove, 
+    to_move: Color
+) -> Result<(), String> {
+    // SCID's exact arrays from game.cpp
+    const TO_SQUARE_DIFF: [i8; 16] = [
+        7, 8, 9,    // 0-2: capture-left, forward, capture-right
+        7, 8, 9,    // 3-5: capture-left+Queen, forward+Queen, capture-right+Queen  
+        7, 8, 9,    // 6-8: capture-left+Rook, forward+Rook, capture-right+Rook
+        7, 8, 9,    // 9-11: capture-left+Bishop, forward+Bishop, capture-right+Bishop
+        7, 8, 9,    // 12-14: capture-left+Knight, forward+Knight, capture-right+Knight
+        16          // 15: double pawn push (2 squares forward)
+    ];
+    
+    const PROMO_PIECE_FROM_VAL: [PieceType; 16] = [
+        PieceType::Empty, PieceType::Empty, PieceType::Empty,  // 0-2
+        PieceType::Queen, PieceType::Queen, PieceType::Queen,  // 3-5
+        PieceType::Rook,  PieceType::Rook,  PieceType::Rook,   // 6-8
+        PieceType::Bishop,PieceType::Bishop,PieceType::Bishop, // 9-11
+        PieceType::Knight,PieceType::Knight,PieceType::Knight, // 12-14
+        PieceType::Empty                                       // 15
+    ];
+    
+    if move_value >= 16 {
+        return Err(format!("Invalid pawn move value: {}", move_value));
+    }
+    
+    let square_diff = TO_SQUARE_DIFF[move_value as usize];
+    
+    // SCID's exact logic:
+    // if (toMove == WHITE) {
+    //     sm->to = sm->from + toSquareDiff[val];
+    // } else {
+    //     sm->to = sm->from - toSquareDiff[val];
+    // }
+    let target_square = match to_move {
+        Color::White => scid_move.from.0 as i8 + square_diff,
+        Color::Black => scid_move.from.0 as i8 - square_diff,
+    };
+    
+    if target_square < 0 || target_square > 63 {
+        return Err(format!("Target square out of bounds: {}", target_square));
+    }
+    
+    scid_move.to = Square(target_square as u8);
+    scid_move.promote = PROMO_PIECE_FROM_VAL[move_value as usize];
+    
+    Ok(())
+}
+
+/// King move decoder - exact copy of SCID's decodeKing function
+/// From scidvspc/src/game.cpp decodeKing()
+pub fn decode_king(move_value: u8, scid_move: &mut ScidMove) -> Result<(), String> {
+    // SCID's exact square difference array from game.cpp
+    const SQUARE_DIFF: [i8; 11] = [
+        0, -9, -8, -7, -1, 1, 7, 8, 9, -2, 2
+    ];
+    
+    if move_value == 0 {
+        // Null move - King stays in place
+        scid_move.to = scid_move.from;
+        return Ok(());
+    }
+    
+    if move_value as usize >= SQUARE_DIFF.len() {
+        return Err(format!("Invalid king move value: {}", move_value));
+    }
+    
+    let square_diff = SQUARE_DIFF[move_value as usize];
+    let target_square = scid_move.from.0 as i8 + square_diff;
+    
+    if target_square < 0 || target_square > 63 {
+        return Err(format!("King target square out of bounds: {}", target_square));
+    }
+    
+    scid_move.to = Square(target_square as u8);
+    Ok(())
+}
+
+/// Knight move decoder - exact copy of SCID's decodeKnight function
+/// From scidvspc/src/game.cpp decodeKnight()
+pub fn decode_knight(move_value: u8, scid_move: &mut ScidMove) -> Result<(), String> {
+    // SCID's exact square difference array from game.cpp
+    const SQUARE_DIFF: [i8; 9] = [
+        0, -17, -15, -10, -6, 6, 10, 15, 17
+    ];
+    
+    if move_value < 1 || move_value > 8 {
+        return Err(format!("Invalid knight move value: {} (valid: 1-8)", move_value));
+    }
+    
+    let square_diff = SQUARE_DIFF[move_value as usize];
+    let target_square = scid_move.from.0 as i8 + square_diff;
+    
+    // Enhanced bounds checking - also check for wrapping around board edges
+    if target_square < 0 || target_square > 63 {
+        return Err(format!("Knight target square out of bounds: {} (from square {}, diff {})", 
+            target_square, scid_move.from.0, square_diff));
+    }
+    
+    // Additional check: Knight moves shouldn't wrap around board edges
+    let from_file = scid_move.from.0 & 0x7;
+    let from_rank = (scid_move.from.0 >> 3) & 0x7;
+    let to_file = (target_square as u8) & 0x7;
+    let to_rank = ((target_square as u8) >> 3) & 0x7;
+    
+    let file_diff = (to_file as i8 - from_file as i8).abs();
+    let rank_diff = (to_rank as i8 - from_rank as i8).abs();
+    
+    // Valid knight moves: (1,2) or (2,1) combinations only
+    if !((file_diff == 1 && rank_diff == 2) || (file_diff == 2 && rank_diff == 1)) {
+        return Err(format!("Invalid knight move geometry: from {}{} to {}{}", 
+            char::from(b'a' + from_file), from_rank + 1,
+            char::from(b'a' + to_file), to_rank + 1));
+    }
+    
+    scid_move.to = Square(target_square as u8);
+    Ok(())
+}
+
+/// Rook move decoder - exact copy of SCID's decodeRook function
+/// From scidvspc/src/game.cpp decodeRook()
+pub fn decode_rook(move_value: u8, scid_move: &mut ScidMove) -> Result<(), String> {
+    // SCID coordinate system: square = (rank << 3) | file
+    let from_file = scid_move.from.0 & 0x7;        // square_Fyle(from)
+    let from_rank = (scid_move.from.0 >> 3) & 0x7; // square_Rank(from)
+    
+    let target_square = if move_value >= 8 {
+        // Vertical move: move along file to different rank
+        // sm->to = square_Make(square_Fyle(sm->from), (val - 8))
+        let target_rank = move_value - 8;
+        if target_rank > 7 {
+            return Err(format!("Invalid rook target rank: {}", target_rank));
+        }
+        (target_rank << 3) | from_file
+    } else {
+        // Horizontal move: move along rank to different file
+        // sm->to = square_Make(val, square_Rank(sm->from))
+        if move_value > 7 {
+            return Err(format!("Invalid rook target file: {}", move_value));
+        }
+        (from_rank << 3) | move_value
+    };
+    
+    scid_move.to = Square(target_square);
+    Ok(())
+}
+
+/// Bishop move decoder - exact copy of SCID's decodeBishop function
+/// From scidvspc/src/game.cpp decodeBishop()
+pub fn decode_bishop(move_value: u8, scid_move: &mut ScidMove) -> Result<(), String> {
+    // SCID logic: byte fyle = (val & 7)
+    let target_file = move_value & 7;
+    let from_file = scid_move.from.0 & 0x7;        // square_Fyle(from)
+    let from_rank = (scid_move.from.0 >> 3) & 0x7; // square_Rank(from)
+    
+    // int fylediff = (int)fyle - (int)square_Fyle(sm->from)
+    let file_diff = target_file as i8 - from_file as i8;
+    
+    let target_square = if move_value >= 8 {
+        // Up-left/down-right direction move
+        // sm->to = sm->from - 7 * fylediff
+        scid_move.from.0 as i8 - 7 * file_diff
+    } else {
+        // Up-right/down-left direction move
+        // sm->to = sm->from + 9 * fylediff
+        scid_move.from.0 as i8 + 9 * file_diff
+    };
+    
+    if target_square < 0 || target_square > 63 {
+        return Err(format!("Bishop target square out of bounds: {} (from {}:{}, target file {}, diff {})", 
+            target_square, char::from(b'a' + from_file), from_rank + 1, 
+            char::from(b'a' + target_file), file_diff));
+    }
+    
+    // Additional validation: Check that it's actually a diagonal move
+    let to_file = (target_square as u8) & 0x7;
+    let to_rank = ((target_square as u8) >> 3) & 0x7;
+    
+    let file_distance = (to_file as i8 - from_file as i8).abs();
+    let rank_distance = (to_rank as i8 - from_rank as i8).abs();
+    
+    if file_distance != rank_distance || file_distance == 0 {
+        return Err(format!("Invalid bishop move - not diagonal: from {}{} to {}{}", 
+            char::from(b'a' + from_file), from_rank + 1,
+            char::from(b'a' + to_file), to_rank + 1));
+    }
+    
+    scid_move.to = Square(target_square as u8);
+    Ok(())
+}
+
+/// Queen move decoder - exact copy of SCID's decodeQueen function
+/// From scidvspc/src/game.cpp decodeQueen()
+/// NOTE: Queen diagonal moves require TWO bytes - not implemented yet (requires ByteBuffer)
+pub fn decode_queen(move_value: u8, scid_move: &mut ScidMove) -> Result<(), String> {
+    // SCID coordinate system
+    let from_file = scid_move.from.0 & 0x7;        // square_Fyle(from)
+    let from_rank = (scid_move.from.0 >> 3) & 0x7; // square_Rank(from)
+    
+    if move_value >= 8 {
+        // Rook-vertical move: sm->to = square_Make(square_Fyle(sm->from), (val - 8))
+        let target_rank = move_value - 8;
+        if target_rank > 7 {
+            return Err(format!("Invalid queen target rank: {}", target_rank));
+        }
+        let target_square = (target_rank << 3) | from_file;
+        scid_move.to = Square(target_square);
+        
+    } else if move_value != from_file {
+        // Rook-horizontal move: sm->to = square_Make(val, square_Rank(sm->from))
+        if move_value > 7 {
+            return Err(format!("Invalid queen target file: {}", move_value));
+        }
+        let target_square = (from_rank << 3) | move_value;
+        scid_move.to = Square(target_square);
+        
+    } else {
+        // Diagonal move: coded in TWO bytes - NOT IMPLEMENTED YET
+        // This requires access to ByteBuffer to read the next byte
+        // val = buf->GetByte(); sm->to = val - 64;
+        return Err("Queen diagonal moves require ByteBuffer access - not implemented yet".to_string());
+    }
+    
+    Ok(())
+}

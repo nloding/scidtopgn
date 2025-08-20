@@ -1157,6 +1157,7 @@ pub fn parse_pgn_tags(game_data: &[u8]) -> Result<GameParseState, Box<dyn std::e
 /// - move_value 9: Queenside castling → shakmaty::Move::Castle{king: e1/e8, rook: a1/a8}
 /// - move_value 10: Kingside castling → shakmaty::Move::Castle{king: e1/e8, rook: h1/h8}
 /// - Square differences: [0, -9, -8, -7, -1, 1, 7, 8, 9, -2, 2]
+// DEPRECATED: Use position-aware decoder in src/position/decoder.rs
 fn decode_king_move(move_value: u8) -> MoveInterpretation {
     // SCID King move lookup table from game.cpp decodeKing()
     let descriptions = [
@@ -1186,6 +1187,7 @@ fn decode_king_move(move_value: u8) -> MoveInterpretation {
 }
 
 /// Decode Queen moves based on SCID source code (game.cpp decodeQueen function)
+// DEPRECATED: Use position-aware decoder in src/position/decoder.rs
 fn decode_queen_move(move_value: u8) -> MoveInterpretation {
     if move_value >= 8 {
         // Rook-vertical move: val - 8 gives target rank
@@ -1203,7 +1205,8 @@ fn decode_queen_move(move_value: u8) -> MoveInterpretation {
     }
 }
 
-/// Decode Rook moves based on SCID source code (game.cpp decodeRook function)
+/// Decode Rook moves based on SCID source code (game.cpp decodeRook function)  
+// DEPRECATED: Use position-aware decoder in src/position/decoder.rs
 fn decode_rook_move(move_value: u8) -> MoveInterpretation {
     if move_value >= 8 {
         // Move along a file to different rank
@@ -1222,6 +1225,7 @@ fn decode_rook_move(move_value: u8) -> MoveInterpretation {
 }
 
 /// Decode Bishop moves based on SCID source code (game.cpp decodeBishop function)  
+// DEPRECATED: Use position-aware decoder in src/position/decoder.rs
 fn decode_bishop_move(move_value: u8) -> MoveInterpretation {
     let target_file = move_value & 7; // Lower 3 bits
     let direction = if move_value >= 8 {
@@ -1238,6 +1242,7 @@ fn decode_bishop_move(move_value: u8) -> MoveInterpretation {
 
 /// Decode Knight moves based on SCID source code (game.cpp decodeKnight function)
 /// Reference: static const int sqdiff[] = { 0, -17, -15, -10, -6, 6, 10, 15, 17 };
+// DEPRECATED: Use position-aware decoder in src/position/decoder.rs
 fn decode_knight_move(move_value: u8) -> MoveInterpretation {
     let descriptions = [
         "invalid (0)",      // 0: invalid
@@ -1264,11 +1269,19 @@ fn decode_knight_move(move_value: u8) -> MoveInterpretation {
 }
 
 /// Decode Pawn moves based on SCID source code (game.cpp decodePawn function)
+// ============================================================================
+// BROKEN: This function incorrectly interprets pawn moves without position
+// PROBLEM: Value 15 interpreted as "en_passant" but is actually double push  
+// EXAMPLE: CF byte (piece 12, value 15) wrongly decoded as "en passant" not "e4"
+// REPLACED BY: Position-aware pawn decoder in src/position/decoder.rs
+// ============================================================================
 fn decode_pawn_move(move_value: u8) -> MoveInterpretation {
+    // WARNING: This static interpretation is INCORRECT
+    // It lacks position context to determine actual pawn moves
     let (move_type, promotion) = match move_value {
-        0 => ("en_passant_left", None),     // Special en passant encoding
+        0 => ("BROKEN: static en_passant", None),     // WRONG: needs position
         1 => ("forward", None),
-        2 => ("en_passant_right", None),    // Special en passant encoding
+        2 => ("BROKEN: static en_passant", None),     // WRONG: needs position
         3 => ("capture left+Q", Some("Queen")),   // +7/-7 with Queen promotion
         4 => ("forward+Q", Some("Queen")),        // +8/-8 with Queen promotion
         5 => ("capture right+Q", Some("Queen")),  // +9/-9 with Queen promotion
@@ -1281,21 +1294,21 @@ fn decode_pawn_move(move_value: u8) -> MoveInterpretation {
         12 => ("capture left+N", Some("Knight")), // +7/-7 with Knight promotion
         13 => ("forward+N", Some("Knight")),      // +8/-8 with Knight promotion
         14 => ("capture right+N", Some("Knight")), // +9/-9 with Knight promotion
-        15 => ("en_passant_forward", None), // Rare en passant variant
+        15 => ("BROKEN: should be double push", None), // WRONG: CF byte is e2-e4, not en passant!
         _ => ("unknown", None),
     };
     
     if move_type == "unknown" {
         return MoveInterpretation::Unknown {
-            reason: format!("Invalid pawn move value: {}", move_value),
+            reason: format!("DEPRECATED: Use position-aware decoder for pawn move {}", move_value),
         };
     }
     
     MoveInterpretation::Pawn {
         direction: move_type.to_string(),
         promotion: promotion.map(|s| s.to_string()),
-        description: format!("Pawn {}", move_type),
-        is_en_passant: Some(move_type.contains("en_passant")),
+        description: format!("DEPRECATED Pawn {}", move_type),
+        is_en_passant: Some(false), // CORRECTED: Don't make static en passant assumptions
     }
 }
 
@@ -1790,9 +1803,17 @@ fn generate_basic_algebraic_notation(chess_move: &Move, _position: &ChessPositio
 
 /// Attempt to decode a move based on available information (legacy heuristic version)
 /// This will be replaced by decode_move_with_position once position tracking is integrated
+// ============================================================================
+// DEPRECATED: This function uses broken static interpretation without position
+// REPLACED BY: Position-aware decoding in src/position/decoder.rs
+// STATUS: Kept for backward compatibility but should not be used
+// TODO: Remove this function once all callers use position-aware decoding
+// ============================================================================
 fn try_decode_move(piece_num: u8, move_value: u8, raw_byte: u8) -> Option<DecodedMove> {
-    // Without position tracking, we use heuristics based on common piece arrangements
-    // This is approximate but demonstrates the decoding capability
+    // WARNING: This function provides inaccurate static interpretation
+    // Example: CF byte was incorrectly decoded as "en passant" instead of "e4"
+    // Use crate::position::decode_move() for accurate position-aware decoding
+    
     let interpretation = match piece_num {
         0 => decode_king_move(move_value),           // King usually piece 0
         1 | 7 => decode_queen_move(move_value),      // Queens often piece 1 or 7
@@ -1801,7 +1822,7 @@ fn try_decode_move(piece_num: u8, move_value: u8, raw_byte: u8) -> Option<Decode
         4 | 11 => decode_knight_move(move_value),    // Knights often pieces 4, 11
         5 | 6 | 8 | 12..=15 => decode_pawn_move(move_value), // Pawns typically 5,6,8,12-15
         _ => MoveInterpretation::Unknown {
-            reason: format!("Piece {} interpretation uncertain", piece_num),
+            reason: format!("DEPRECATED: Use position-aware decoder for piece {}", piece_num),
         }
     };
     

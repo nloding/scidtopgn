@@ -447,7 +447,7 @@ impl ScidPositionTracker {
         }
         let from_sq = piece_list[piece_index];
         let legals = self.current_position.legal_moves();
-        let mut candidate_moves: Vec<_> = legals.into_iter().filter(|m| m.from() == Some(from_sq)).collect();
+        let candidate_moves: Vec<_> = legals.into_iter().filter(|m| m.from() == Some(from_sq)).collect();
         if move_value as usize >= candidate_moves.len() {
             return None;
         }

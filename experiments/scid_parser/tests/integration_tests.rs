@@ -287,29 +287,12 @@ fn test_enhanced_error_integration() {
     assert!(formatted.contains("Test conversion error"));
 }
 
-/// Test utility functions integration
-#[test]
-fn test_utility_functions() {
-    use scid_parser::utils::{validate_magic_bytes, read_u8_enhanced};
-    use std::io::Cursor;
-    
-    // Test magic byte validation
-    let expected = b"Scid.si\0";
-    let actual = b"Scid.si\0";
-    let result = validate_magic_bytes(expected, actual, "SI4");
-    assert!(result.is_ok());
-    
-    // Test invalid magic bytes
-    let invalid = b"Invalid\0";
-    let result = validate_magic_bytes(expected, invalid, "SI4");
-    assert!(result.is_err());
-    
-    // Test enhanced reading with context
-    let mut data = Cursor::new(vec![42u8]);
-    let result = read_u8_enhanced(&mut data, "test context");
-    assert!(result.is_ok());
-    assert_eq!(result.unwrap(), 42);
-}
+/// Test utility functions integration - DEPRECATED
+// These utility functions were removed during Phase 5 cleanup
+// #[test]
+// fn test_utility_functions() {
+//     // Utilities were integrated into individual modules during position-aware refactor
+// }
 
 /// Test comprehensive workflow preparation
 #[test]

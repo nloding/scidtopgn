@@ -21,6 +21,9 @@ pub mod error;
 // PGN export module
 pub mod pgn;
 
+// Position-aware decoding modules
+pub mod position;
+
 // Re-export key types for easier access
 pub use bridge::{GameState, GameMetadata, PositionContext, ChessNotation, ChessValidation};
 pub use error::{ScidError, Result};
