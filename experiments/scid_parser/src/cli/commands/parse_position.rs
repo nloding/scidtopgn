@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::BufReader;
 use crate::si4::*;
 use crate::sg4::*;
-use crate::position::integration::PositionTracker;
+use crate::position::{PositionTracker, ScidByteStream};
 use crate::cli::output::tables::truncate_name;
 
 pub fn execute(base_path: &str) -> std::io::Result<()> {
@@ -30,10 +30,12 @@ fn parse_scid_database_with_position(base_path: &str) {
                     println!("│ Auto Load Game          │ {}                                              │", header.auto_load);
                     println!("│ Description             │ {}                                              │", header.description.trim_end_matches('\0'));
                     println!("│ 🚀 Position-Aware       │ ENABLED - Using SCID-compliant move decoding   │");
+                    println!("│ 🔥 Streaming Support    │ ENABLED - Multi-byte Queen diagonal moves      │");
                     println!("└─────────────────────────┴─────────────────────────────────────────────────┘");
                     println!();
-                    println!("🎯 This parser uses position-aware move decoding to ensure accurate conversion!");
+                    println!("🎯 This parser uses streaming position-aware move decoding for maximum accuracy!");
                     println!("✅ CF byte will correctly decode to 'e4' instead of 'Pawn en_passant'");
+                    println!("🔥 Queen diagonal moves (2-byte) are now fully supported!");
                 }
                 Err(e) => {
                     println!("Error parsing SI4 file: {}", e);
@@ -107,8 +109,8 @@ fn display_games_with_position(si4_path: &str, sg4_data: &[u8], games: Vec<(usiz
         // Extract game data from SG4
         let game_data = &sg4_data[*start_offset..*end_offset];
         
-        // Parse game content
-        let parsed_game = match parse_pgn_tags(game_data) {
+        // Parse game content using streaming parser
+        let parsed_game = match parse_pgn_tags_with_streaming(game_data) {
             Ok(game) => game,
             Err(e) => {
                 println!("❌ Could not parse game {} content: {}", game_num + 1, e);
@@ -148,21 +150,35 @@ fn display_games_with_position(si4_path: &str, sg4_data: &[u8], games: Vec<(usiz
         
         println!("│ Starting Position       │ ✅ Standard chess starting position                                             │");
         
-        // Process each move element with position awareness
+        // Process each move element with streaming-aware position tracking
         for element in &parsed_game.elements {
-            if let GameElement::Move { raw_byte, offset, .. } = element {
+            if let StreamingGameElement::Move { raw_bytes, offset, bytes_consumed, .. } = element {
                 move_count += 1;
                 
-                match position_tracker.process_move(*raw_byte, *offset) {
+                // Create stream from raw bytes for this move
+                let mut move_stream = ScidByteStream::new(raw_bytes);
+                match position_tracker.process_move_from_stream(&mut move_stream, *offset) {
                     Ok(decoded_move) => {
                         let move_desc = decoded_move.interpretation.description();
-                        println!("│ Move {}                  │ ✅ {} │", 
-                            move_count, 
-                            truncate_name(move_desc, 70)
+                        let byte_info = if *bytes_consumed > 1 {
+                            format!(" ({} bytes)", bytes_consumed)
+                        } else {
+                            String::new()
+                        };
+                        
+                        println!("│ Move {}{}               │ ✅ {} │", 
+                            move_count,
+                            byte_info,
+                            truncate_name(move_desc, 65)
                         );
                         
+                        // Special highlighting for multi-byte moves (Queen diagonal)
+                        if *bytes_consumed == 2 {
+                            println!("│ 🔥 2-BYTE MOVE DETECTED │ ✅ Queen diagonal move successfully decoded                                     │");
+                        }
+                        
                         // Special highlighting for the CF byte (our test case)
-                        if *raw_byte == 0xCF {
+                        if raw_bytes.len() > 0 && raw_bytes[0] == 0xCF {
                             println!("│ 🎯 CF BYTE DETECTED     │ ✅ Correctly decoded (not 'en passant')                                        │");
                         }
                     },

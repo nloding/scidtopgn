@@ -18,6 +18,7 @@
 // ===============================
 // use crate::utils::*;  // Commented out - unused import
 use crate::bridge::{GameState, PositionContext};
+use crate::position::{ScidByteStream, decode_move_with_stream, ScidPosition};
 use shakmaty::Move as ShakmMove;
 // use std::fs::File;  // Commented out - unused import
 // use std::io::Read;  // Commented out - unused import
@@ -221,6 +222,18 @@ pub enum MoveInterpretation {
         description: String, // Human-readable description
         is_en_passant: Option<bool>, // True if this is an en passant capture
     },
+    /// Position-aware decoded move with complete information
+    /// SHAKMATY MAPPING: Move::Normal{role, from, to, capture, promotion}
+    /// This variant is used by the stream-aware decoder for multi-byte moves
+    Decoded {
+        description: String,           // Human-readable move description
+        from_square: Option<String>,   // Source square in algebraic notation
+        to_square: Option<String>,     // Target square in algebraic notation  
+        piece_type: Option<String>,    // Moving piece type
+        is_capture: bool,              // True if this move captures a piece
+        is_promotion: bool,            // True if this is a pawn promotion
+        bytes_consumed: usize,         // Number of bytes consumed from stream
+    },
     /// Unknown move encoding - conversion will fail with error
     /// SHAKMATY MAPPING: Returns ConversionError
     Unknown {
@@ -238,6 +251,7 @@ impl MoveInterpretation {
             MoveInterpretation::Bishop { description, .. } => description,
             MoveInterpretation::Knight { description, .. } => description,
             MoveInterpretation::Pawn { description, .. } => description,
+            MoveInterpretation::Decoded { description, .. } => description,
             MoveInterpretation::Unknown { reason } => reason,
         }
     }
@@ -408,6 +422,53 @@ pub struct GameParseState {
     pub tags: Vec<PgnTag>,
     pub flags: GameFlags,
     pub elements: Vec<GameElement>,
+    pub tags_end_offset: usize,
+    pub flags_offset: usize,
+    pub moves_start_offset: usize,
+}
+
+/// Updated game element for streaming parser
+/// Used by parse_pgn_tags_with_streaming for variable-length move support
+#[derive(Debug, Clone)]
+pub enum StreamingGameElement {
+    Move {
+        piece_num: u8,
+        move_value: u8,        // May not be meaningful for multi-byte moves
+        raw_bytes: Vec<u8>,    // All bytes consumed by this move
+        offset: usize,
+        bytes_consumed: usize, // How many bytes this move used
+    },
+    Nag {
+        nag_value: u8,         // NAG annotation value
+        offset: usize,         // File offset of NAG marker
+    },
+    Comment {
+        text: String,          // Comment text
+        offset: usize,         // File offset of comment marker
+    },
+    VariationStart {
+        offset: usize,         // File offset of variation start marker
+    },
+    VariationEnd {
+        offset: usize,         // File offset of variation end marker
+    },
+    GameEnd {
+        offset: usize,         // File offset of game end marker
+    },
+    Unknown {
+        byte_value: u8,        // Original byte that couldn't be parsed
+        offset: usize,         // File offset
+        error: String,         // Error description
+    },
+}
+
+/// Updated game parse state for streaming
+/// Used by parse_pgn_tags_with_streaming function
+#[derive(Debug)]
+pub struct StreamingGameParseState {
+    pub elements: Vec<StreamingGameElement>,
+    pub tags: Vec<PgnTag>,
+    pub flags: GameFlags,
     pub tags_end_offset: usize,
     pub flags_offset: usize,
     pub moves_start_offset: usize,
@@ -1147,6 +1208,195 @@ pub fn parse_pgn_tags(game_data: &[u8]) -> Result<GameParseState, Box<dyn std::e
         flags_offset,
         moves_start_offset,
     })
+}
+
+/// Updated game parsing with streaming move decoder
+/// Modified version of existing parse_pgn_tags() function
+/// Supports variable-length moves including Queen diagonal moves (2-byte)
+pub fn parse_pgn_tags_with_streaming(game_data: &[u8]) -> Result<StreamingGameParseState, Box<dyn std::error::Error>> {
+    let mut elements = Vec::new();
+    let mut stream = ScidByteStream::new(game_data);
+    
+    // Parse tags first (same logic as existing parser)
+    let mut tags = Vec::new();
+    
+    // Tags are terminated by a zero byte
+    while stream.has_bytes() {
+        let tag_length_byte = stream.get_byte()?;
+        
+        // Zero byte marks end of tags section
+        if tag_length_byte == 0 {
+            break;
+        }
+        
+        // Special case: 255 = binary EventDate encoding (3 bytes follow)
+        if tag_length_byte == 255 {
+            if stream.bytes_remaining() < 3 {
+                return Err("Insufficient data for binary EventDate encoding".into());
+            }
+            // Skip the 3-byte date for now - we'll implement this later
+            stream.get_byte()?;
+            stream.get_byte()?;
+            stream.get_byte()?;
+            continue;
+        }
+        
+        let (tag_name, value_length_pos) = if tag_length_byte >= COMMON_TAG_THRESHOLD {
+            // Common tag encoded as single byte (241-255)
+            let common_tag_index = (tag_length_byte - COMMON_TAG_THRESHOLD) as usize;
+            if common_tag_index >= COMMON_TAGS.len() {
+                return Err(format!("Invalid common tag index: {}", common_tag_index).into());
+            }
+            (COMMON_TAGS[common_tag_index].to_string(), stream.position())
+        } else {
+            // Regular tag - length byte followed by tag name string
+            let tag_len = tag_length_byte as usize;
+            if stream.bytes_remaining() < tag_len {
+                return Err("Insufficient data for tag name".into());
+            }
+            let mut tag_bytes = Vec::new();
+            for _ in 0..tag_len {
+                tag_bytes.push(stream.get_byte()?);
+            }
+            let tag_name = String::from_utf8_lossy(&tag_bytes).to_string();
+            (tag_name, stream.position())
+        };
+        
+        // Read value length and value
+        if !stream.has_bytes() {
+            return Err("Missing value length byte".into());
+        }
+        let value_len = stream.get_byte()? as usize;
+        
+        if stream.bytes_remaining() < value_len {
+            return Err("Insufficient data for tag value".into());
+        }
+        let mut value_bytes = Vec::new();
+        for _ in 0..value_len {
+            value_bytes.push(stream.get_byte()?);
+        }
+        let tag_value = String::from_utf8_lossy(&value_bytes).to_string();
+        
+        tags.push(PgnTag {
+            name: tag_name,
+            value: tag_value,
+        });
+    }
+    
+    let tags_end_offset = stream.position();
+    
+    // After tags, there should be a game flags byte
+    if !stream.has_bytes() {
+        return Err("Missing game flags byte after tags".into());
+    }
+    
+    let flags_byte = stream.get_byte()?;
+    let flags_offset = stream.position() - 1;
+    
+    // Parse flags according to SCID source code
+    let flags = GameFlags {
+        non_standard_start: (flags_byte & 1) != 0,
+        has_promotions: (flags_byte & 2) != 0,
+        has_under_promotions: (flags_byte & 4) != 0,
+        raw_value: flags_byte,
+    };
+    
+    let moves_start_offset = stream.position();
+    
+    // Create dummy position for move decoding
+    let dummy_position = ScidPosition::new_starting_position();
+    
+    // 🔥 KEY CHANGE: Process moves using streaming decoder
+    while stream.has_bytes() {
+        let current_offset = stream.position();
+        
+        // Read next byte to determine element type
+        let byte = stream.get_byte()?;
+        
+        match byte {
+            // Special game elements (same as existing logic)
+            ENCODE_NAG => { // 11
+                if stream.has_bytes() {
+                    let nag_value = stream.get_byte()?;
+                    elements.push(StreamingGameElement::Nag { nag_value, offset: current_offset });
+                }
+            }
+            ENCODE_COMMENT => { // 12
+                let comment = read_null_terminated_string(&mut stream)?;
+                elements.push(StreamingGameElement::Comment { text: comment, offset: current_offset });
+            }
+            ENCODE_START_MARKER => { // 13
+                elements.push(StreamingGameElement::VariationStart { offset: current_offset });
+            }
+            ENCODE_END_MARKER => { // 14
+                elements.push(StreamingGameElement::VariationEnd { offset: current_offset });
+            }
+            ENCODE_END_GAME => { // 15
+                elements.push(StreamingGameElement::GameEnd { offset: current_offset });
+                break;
+            }
+            // 🔥 REGULAR MOVE: Let streaming decoder handle variable bytes
+            _ => {
+                // Create temporary stream from current position for move parsing
+                let move_start_position = current_offset;
+                let mut temp_stream = ScidByteStream::new(&game_data[current_offset..]);
+                
+                // Try to parse as move - decoder will consume appropriate bytes
+                match decode_move_with_stream(&dummy_position, &mut temp_stream) {
+                    Ok(scid_move) => {
+                        let bytes_consumed = temp_stream.position();
+                        let piece_num = scid_move.piece_num;
+                        let move_value = 0; // Not meaningful for streaming moves
+                        
+                        elements.push(StreamingGameElement::Move {
+                            piece_num,
+                            move_value,
+                            raw_bytes: game_data[current_offset..current_offset + bytes_consumed].to_vec(),
+                            offset: current_offset,
+                            bytes_consumed,
+                        });
+                        
+                        // Advance main stream by consumed bytes
+                        for _ in 1..bytes_consumed { // Skip first byte (already read)
+                            stream.get_byte()?;
+                        }
+                    }
+                    Err(e) => {
+                        // Parsing failed - treat as unknown element
+                        elements.push(StreamingGameElement::Unknown { 
+                            byte_value: byte, 
+                            offset: current_offset,
+                            error: e,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(StreamingGameParseState { 
+        elements,
+        tags,
+        flags,
+        tags_end_offset,
+        flags_offset,
+        moves_start_offset,
+    })
+}
+
+/// Helper function to read null-terminated string from stream
+fn read_null_terminated_string(stream: &mut ScidByteStream) -> Result<String, Box<dyn std::error::Error>> {
+    let mut bytes = Vec::new();
+    
+    while stream.has_bytes() {
+        let byte = stream.get_byte()?;
+        if byte == 0 {
+            break; // Found null terminator
+        }
+        bytes.push(byte);
+    }
+    
+    Ok(String::from_utf8_lossy(&bytes).to_string())
 }
 
 /// Decode King moves based on SCID source code (game.cpp decodeKing function)

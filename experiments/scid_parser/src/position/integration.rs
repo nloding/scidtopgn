@@ -1,7 +1,7 @@
 // Integration module for position-aware move decoding
 // Bridges our SCID-compliant position decoder with existing game parsing
 
-use crate::position::{ScidPosition, ScidMove, decode_move};
+use crate::position::{ScidPosition, ScidMove, decode_move, decode_move_with_stream, ScidByteStream};
 use crate::sg4::{DecodedMove, MoveInterpretation};
 
 /// Convert our ScidMove to the existing DecodedMove format
@@ -109,24 +109,48 @@ impl PositionTracker {
         }
     }
     
-    /// Process a move byte with position-aware decoding
-    pub fn process_move(&mut self, raw_byte: u8, offset: usize) -> Result<DecodedMove, String> {
-        // Decode the move using current position
-        let decoded_move = decode_move_with_position(&self.position, raw_byte, offset)?;
+    /// Process move from byte stream (supports multi-byte moves)
+    pub fn process_move_from_stream(&mut self, stream: &mut ScidByteStream, _offset: usize) -> Result<DecodedMove, String> {
+        // Record stream position before decoding (for debugging)
+        let initial_position = stream.position();
         
-        // Convert back to ScidMove to apply to position
-        let _piece_num = (raw_byte >> 4) as usize;
-        let _move_value = raw_byte & 0x0F;
+        // Decode move using stream-aware decoder
+        let scid_move = decode_move_with_stream(&self.position, stream)?;
         
-        if let Ok(scid_move) = decode_move(&self.position, raw_byte) {
-            // Apply the move to update position
-            if let Err(e) = self.position.do_move(&scid_move) {
-                return Err(format!("Failed to apply move {}: {}", self.move_count + 1, e));
-            }
-            self.move_count += 1;
+        // Calculate bytes consumed (for multi-byte moves)
+        let bytes_consumed = stream.position() - initial_position;
+        
+        // Apply the move to update position
+        if let Err(e) = self.position.do_move(&scid_move) {
+            return Err(format!("Failed to apply move {}: {}", self.move_count + 1, e));
         }
+        self.move_count += 1;
+        
+        // Create DecodedMove for compatibility with existing code
+        let decoded_move = DecodedMove {
+            piece_num: scid_move.piece_num,
+            move_value: 0, // Not meaningful for multi-byte moves
+            raw_byte: 0,   // Not meaningful for multi-byte moves  
+            interpretation: MoveInterpretation::Decoded {
+                description: scid_move.to_algebraic(&self.position),
+                from_square: Some(scid_move.from.to_algebraic()),
+                to_square: Some(scid_move.to.to_algebraic()),
+                piece_type: Some(format!("{:?}", scid_move.moving_piece)),
+                is_capture: scid_move.captured_piece != crate::position::PieceType::Empty,
+                is_promotion: scid_move.promote != crate::position::PieceType::Empty,
+                bytes_consumed, // 🔥 NEW: Track how many bytes this move consumed
+            },
+        };
         
         Ok(decoded_move)
+    }
+    
+    /// Process a move byte with position-aware decoding (backward compatibility)
+    pub fn process_move(&mut self, raw_byte: u8, offset: usize) -> Result<DecodedMove, String> {
+        // Create temporary stream with single byte
+        let byte_array = [raw_byte];
+        let mut stream = ScidByteStream::new(&byte_array);
+        self.process_move_from_stream(&mut stream, offset)
     }
     
     /// Get current position (for debugging)

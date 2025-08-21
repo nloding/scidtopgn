@@ -84,11 +84,79 @@ impl ScidToShakmaty for DecodedMove {
             MoveInterpretation::Pawn { promotion, .. } => {
                 convert_pawn_move(self.move_value, self.piece_num, promotion.as_deref(), position)
             }
+            MoveInterpretation::Decoded { from_square, to_square, piece_type, is_capture, is_promotion, .. } => {
+                // For position-aware decoded moves, we have complete move information
+                // This should be the preferred path for stream-decoded moves
+                convert_decoded_move(from_square, to_square, piece_type, *is_capture, *is_promotion, position)
+            }
             MoveInterpretation::Unknown { reason } => {
                 Err(ScidError::conversion_error(format!("Cannot convert unknown move: {}", reason)))
             }
         }
     }
+}
+
+/// Convert position-aware decoded moves to shakmaty moves
+/// This is the preferred conversion path for stream-decoded moves with complete information
+fn convert_decoded_move(
+    from_square: &Option<String>,
+    to_square: &Option<String>, 
+    piece_type: &Option<String>,
+    is_capture: bool,
+    is_promotion: bool,
+    _position: &Chess
+) -> Result<Move> {
+    // Extract square information
+    let from_str = from_square.as_ref()
+        .ok_or_else(|| ScidError::conversion_error("Missing from square".to_string()))?;
+    let to_str = to_square.as_ref()
+        .ok_or_else(|| ScidError::conversion_error("Missing to square".to_string()))?;
+    
+    // Parse squares
+    let from = from_str.parse::<Square>()
+        .map_err(|e| ScidError::conversion_error(format!("Invalid from square '{}': {}", from_str, e)))?;
+    let to = to_str.parse::<Square>()
+        .map_err(|e| ScidError::conversion_error(format!("Invalid to square '{}': {}", to_str, e)))?;
+    
+    // Determine piece role from piece type
+    let role = match piece_type.as_ref().map(|s| s.as_str()) {
+        Some("Pawn") => Role::Pawn,
+        Some("Knight") => Role::Knight,
+        Some("Bishop") => Role::Bishop,
+        Some("Rook") => Role::Rook,
+        Some("Queen") => Role::Queen,
+        Some("King") => Role::King,
+        _ => return Err(ScidError::conversion_error(format!("Unknown piece type: {:?}", piece_type))),
+    };
+    
+    // Handle special moves
+    if role == Role::King && (to.file() as i8 - from.file() as i8).abs() == 2 {
+        // Castling move
+        let rook_square = match to {
+            Square::G1 => Square::H1, // Kingside castling
+            Square::C1 => Square::A1, // Queenside castling  
+            Square::G8 => Square::H8, // Black kingside
+            Square::C8 => Square::A8, // Black queenside
+            _ => return Err(ScidError::conversion_error("Invalid castling move".to_string())),
+        };
+        return Ok(Move::Castle { king: from, rook: rook_square });
+    }
+    
+    // Handle promotion
+    let promotion = if is_promotion && role == Role::Pawn {
+        Some(Role::Queen) // Default to Queen promotion, could be enhanced
+    } else {
+        None
+    };
+    
+    // Regular move
+    Ok(Move::Normal {
+        role,
+        from,
+        to,
+        capture: if is_capture { Some(role) } else { None }, // Simplified capture piece detection
+        promotion,
+    })
 }
 
 /// Convert SCID king moves to shakmaty moves

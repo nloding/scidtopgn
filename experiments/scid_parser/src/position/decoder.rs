@@ -2,6 +2,7 @@
 // From scidvspc/src/game.cpp decodeMove()
 
 use crate::position::{ScidPosition, ScidMove, PieceType, Square, Color};
+use crate::position::byte_stream::ScidByteStream;
 
 /// Main move decoder - replicates SCID's decodeMove function
 /// From scidvspc/src/game.cpp decodeMove()
@@ -252,16 +253,22 @@ pub fn decode_bishop(move_value: u8, scid_move: &mut ScidMove) -> Result<(), Str
     Ok(())
 }
 
-/// Queen move decoder - exact copy of SCID's decodeQueen function
+/// Queen move decoder - legacy single-byte version (DEPRECATED)
 /// From scidvspc/src/game.cpp decodeQueen()
-/// NOTE: Queen diagonal moves require TWO bytes - not implemented yet (requires ByteBuffer)
+/// 
+/// ⚠️  LIMITATION: This function only supports 1-byte Queen moves (rook-like).
+/// For complete Queen move support including diagonal moves, use decode_queen_with_stream().
+/// 
+/// DEPRECATION NOTE: Queen diagonal moves require 2-byte encoding and stream access.
+/// This function is kept for backward compatibility but will fail on diagonal moves.
 pub fn decode_queen(move_value: u8, scid_move: &mut ScidMove) -> Result<(), String> {
     // SCID coordinate system
     let from_file = scid_move.from.0 & 0x7;        // square_Fyle(from)
     let from_rank = (scid_move.from.0 >> 3) & 0x7; // square_Rank(from)
     
     if move_value >= 8 {
-        // Rook-vertical move: sm->to = square_Make(square_Fyle(sm->from), (val - 8))
+        // ✅ CASE 1: Rook-vertical move (FULLY SUPPORTED)
+        // SCID: sm->to = square_Make(square_Fyle(sm->from), (val - 8))
         let target_rank = move_value - 8;
         if target_rank > 7 {
             return Err(format!("Invalid queen target rank: {}", target_rank));
@@ -270,7 +277,8 @@ pub fn decode_queen(move_value: u8, scid_move: &mut ScidMove) -> Result<(), Stri
         scid_move.to = Square(target_square);
         
     } else if move_value != from_file {
-        // Rook-horizontal move: sm->to = square_Make(val, square_Rank(sm->from))
+        // ✅ CASE 2: Rook-horizontal move (FULLY SUPPORTED)
+        // SCID: sm->to = square_Make(val, square_Rank(sm->from))
         if move_value > 7 {
             return Err(format!("Invalid queen target file: {}", move_value));
         }
@@ -278,10 +286,158 @@ pub fn decode_queen(move_value: u8, scid_move: &mut ScidMove) -> Result<(), Stri
         scid_move.to = Square(target_square);
         
     } else {
-        // Diagonal move: coded in TWO bytes - NOT IMPLEMENTED YET
-        // This requires access to ByteBuffer to read the next byte
-        // val = buf->GetByte(); sm->to = val - 64;
-        return Err("Queen diagonal moves require ByteBuffer access - not implemented yet".to_string());
+        // ⚠️  CASE 3: Diagonal move (NOT SUPPORTED IN LEGACY VERSION)
+        // Queen diagonal moves require 2-byte encoding and stream access.
+        // Use decode_queen_with_stream() for complete functionality.
+        return Err("Queen diagonal moves require stream access - use decode_queen_with_stream() instead".to_string());
+    }
+    
+    Ok(())
+}
+
+/// Main move decoder with stream support for multi-byte moves
+/// Based on SCID's decodeMove() but with ByteBuffer-compatible streaming
+pub fn decode_move_with_stream(
+    position: &ScidPosition,
+    stream: &mut ScidByteStream
+) -> Result<ScidMove, String> {
+    // Step 1: Read first move byte from stream
+    let move_byte = stream.get_byte()
+        .map_err(|e| format!("Failed to read move byte: {}", e))?;
+    
+    // Step 2: Extract piece number and move value (same as before)
+    let piece_num = (move_byte >> 4) as usize;
+    let move_value = move_byte & 0x0F;
+    
+    // Step 3: Get piece location and type (same as existing decode_move)
+    let piece_list = position.piece_list(position.to_move);
+    if piece_num >= 16 {
+        return Err(format!("Invalid piece number: {}", piece_num));
+    }
+    let from_square = piece_list[piece_num];
+    
+    let piece_type = position.piece_at(from_square)
+        .ok_or("No piece at from square")?;
+    
+    // Step 4: Create move structure
+    let mut scid_move = ScidMove {
+        from: from_square,
+        to: from_square,
+        moving_piece: piece_type,
+        captured_piece: PieceType::Empty,
+        promote: PieceType::Empty,
+        piece_num: piece_num as u8,
+    };
+    
+    // Step 5: Route to piece-specific decoder (UPDATED FOR STREAM)
+    match piece_type {
+        PieceType::Pawn => decode_pawn(move_value, &mut scid_move, position.to_move)?,
+        PieceType::Knight => decode_knight(move_value, &mut scid_move)?,
+        PieceType::Rook => decode_rook(move_value, &mut scid_move)?,
+        PieceType::Bishop => decode_bishop(move_value, &mut scid_move)?,
+        PieceType::King => decode_king(move_value, &mut scid_move)?,
+        // 🔥 KEY CHANGE: Use stream-aware Queen decoder
+        PieceType::Queen => decode_queen_with_stream(move_value, &mut scid_move, stream)?,
+        _ => return Err(format!("Invalid piece type: {:?}", piece_type)),
+    }
+    
+    // Step 6: Set captured piece if target square occupied
+    if let Some(captured) = position.piece_at(scid_move.to) {
+        scid_move.captured_piece = captured;
+    }
+    
+    Ok(scid_move)
+}
+
+/// Queen move decoder with ByteBuffer-compatible stream access - COMPLETE IMPLEMENTATION ✅
+/// 
+/// EXACT REPLICATION of scidvspc/src/game.cpp decodeQueen() function with full 2-byte support.
+/// This function implements complete Queen move decoding including diagonal moves that require
+/// reading additional bytes from the stream.
+/// 
+/// **Supported Move Types**:
+/// - ✅ Rook-vertical moves (1 byte): `move_value >= 8`
+/// - ✅ Rook-horizontal moves (1 byte): `move_value != from_file && move_value < 8`
+/// - ✅ Diagonal moves (2 bytes): `move_value == from_file` (NEW IMPLEMENTATION)
+/// 
+/// **Stream Usage**: 
+/// - 1-byte moves: Stream position unchanged
+/// - 2-byte moves: Stream advances by 1 additional byte
+/// 
+/// **SCID Algorithm Compliance**:
+/// - Trigger condition: `val == square_Fyle(sm->from)`
+/// - Target encoding: `target_square = (second_byte - 64)`
+/// - Validation range: second_byte ∈ [64, 127]
+/// 
+/// **Example Usage**:
+/// ```rust
+/// let move_bytes = [0x13, 0x6D]; // Queen diagonal: D4 -> F6
+/// let mut stream = ScidByteStream::new(&move_bytes);
+/// let first_byte = stream.get_byte().unwrap(); // 0x13
+/// let move_value = first_byte & 0x0F;          // 0x03
+/// decode_queen_with_stream(move_value, &mut scid_move, &mut stream).unwrap();
+/// assert_eq!(stream.position(), 1); // Second byte consumed
+/// ```
+pub fn decode_queen_with_stream(
+    move_value: u8, 
+    scid_move: &mut ScidMove,
+    stream: &mut ScidByteStream
+) -> Result<(), String> {
+    // SCID coordinate system
+    let from_file = scid_move.from.0 & 0x7;        // square_Fyle(from)
+    let from_rank = (scid_move.from.0 >> 3) & 0x7; // square_Rank(from)
+    
+    if move_value >= 8 {
+        // ✅ CASE 1: Rook-vertical move (ALREADY WORKING)
+        // SCID: sm->to = square_Make (square_Fyle(sm->from), (val - 8))
+        let target_rank = move_value - 8;
+        if target_rank > 7 {
+            return Err(format!("Invalid queen target rank: {}", target_rank));
+        }
+        let target_square = (target_rank << 3) | from_file;
+        scid_move.to = Square(target_square);
+        
+    } else if move_value != from_file {
+        // ✅ CASE 2: Rook-horizontal move (ALREADY WORKING)
+        // SCID: sm->to = square_Make (val, square_Rank(sm->from))
+        if move_value > 7 {
+            return Err(format!("Invalid queen target file: {}", move_value));
+        }
+        let target_square = (from_rank << 3) | move_value;
+        scid_move.to = Square(target_square);
+        
+    } else {
+        // 🔥 CASE 3: Diagonal move (NEW IMPLEMENTATION)
+        // SCID: val = buf->GetByte(); sm->to = val - 64;
+        
+        let second_byte = stream.get_byte()
+            .map_err(|e| format!("Failed to read second byte for Queen diagonal move: {}", e))?;
+        
+        // SCID validation: if (val < 64 || val > 127) { return ERROR_Decode; }
+        if second_byte < 64 || second_byte > 127 {
+            return Err(format!("Invalid Queen diagonal target byte: {} (valid range: 64-127)", second_byte));
+        }
+        
+        // SCID target calculation: sm->to = val - 64
+        let target_square = second_byte - 64;
+        if target_square > 63 {
+            return Err(format!("Queen diagonal target square out of bounds: {}", target_square));
+        }
+        
+        scid_move.to = Square(target_square);
+        
+        // Additional validation: Verify it's actually a diagonal move
+        let to_file = target_square & 0x7;
+        let to_rank = (target_square >> 3) & 0x7;
+        
+        let file_distance = (to_file as i8 - from_file as i8).abs();
+        let rank_distance = (to_rank as i8 - from_rank as i8).abs();
+        
+        if file_distance != rank_distance || file_distance == 0 {
+            return Err(format!("Invalid Queen diagonal move geometry: from {}{} to {}{}", 
+                char::from(b'a' + from_file), from_rank + 1,
+                char::from(b'a' + to_file), to_rank + 1));
+        }
     }
     
     Ok(())
