@@ -66,6 +66,7 @@ pub use moves::{Square, PieceType, Color, ScidMove};
 
 /// SCID-compatible position tracker
 /// Based on scidvspc/src/position.cpp Position class
+#[derive(Debug, Clone)]
 pub struct ScidPosition {
     /// Board array: 64 squares, each containing piece type or EMPTY
     /// Square numbering: a1=0, b1=1, ..., h8=63 (SCID standard)
@@ -230,6 +231,11 @@ impl ScidPosition {
             false
         }
     }
+    
+    /// Get the current full move number
+    pub fn full_move_number(&self) -> u16 {
+        self.full_move_number
+    }
 }
 
 // Re-export types from moves module
@@ -238,8 +244,10 @@ pub mod decoder;
 pub mod tests;
 pub mod integration;
 pub mod byte_stream;
+pub mod state_manager;
 
 // Re-export key functions
 pub use decoder::{decode_move, decode_move_with_stream, decode_queen_with_stream};
 pub use byte_stream::ScidByteStream;
 pub use integration::PositionTracker;
+pub use state_manager::{PositionState, PositionStateManager};

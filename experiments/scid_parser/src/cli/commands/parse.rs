@@ -4,6 +4,7 @@ use std::io::BufReader;
 use crate::si4::*;
 use crate::sn4::*;
 use crate::sg4::*;
+use crate::position::{PositionTracker, ScidByteStream};
 use crate::cli::output::tables::truncate_name;
 
 pub fn execute(base_path: &str) -> std::io::Result<()> {
@@ -207,8 +208,8 @@ fn display_games(si4_path: &str, sg4_data: &[u8], games: Vec<(usize, usize)>) {
         // Extract game data from SG4
         let game_data = &sg4_data[*start_offset..*end_offset];
         
-        // Parse game content
-        let parsed_game = match parse_pgn_tags(game_data) {
+        // Parse game content using streaming parser for algebraic notation
+        let parsed_game = match parse_pgn_tags_with_streaming(game_data) {
             Ok(game) => game,
             Err(e) => {
                 println!("❌ Could not parse game {} content: {}", game_num + 1, e);
@@ -250,16 +251,29 @@ fn display_games(si4_path: &str, sg4_data: &[u8], games: Vec<(usize, usize)>) {
         println!("│ PGN Tags                │ {} │", parsed_game.tags.len());
         println!("│ Game Elements           │ {} │", parsed_game.elements.len());
         
-        // Extract and display moves
+        // Extract and display moves with position-aware algebraic notation
+        let mut position_tracker = PositionTracker::new();
         let mut move_count = 0;
+        
         for element in &parsed_game.elements {
-            if let GameElement::Move { piece_num, move_value, decoded, .. } = element {
+            if let StreamingGameElement::Move { raw_bytes, offset, .. } = element {
                 move_count += 1;
                 
-                let move_description = if let Some(decoded_move) = decoded {
-                    decoded_move.interpretation.description().to_string()
-                } else {
-                    format!("P{} V{} (undecoded)", piece_num, move_value)
+                // Create stream from raw bytes for this move
+                let mut move_stream = ScidByteStream::new(raw_bytes);
+                let move_description = match position_tracker.process_move_from_stream(&mut move_stream, *offset) {
+                    Ok(decoded_move) => {
+                        // Use algebraic notation from position-aware decoding
+                        decoded_move.interpretation.description().to_string()
+                    },
+                    Err(_) => {
+                        // Fallback for undecoded moves
+                        if raw_bytes.len() > 0 {
+                            format!("Raw byte 0x{:02X} (undecoded)", raw_bytes[0])
+                        } else {
+                            "Empty move (undecoded)".to_string()
+                        }
+                    }
                 };
                 
                 println!("│ Move {}                  │ {} │", 

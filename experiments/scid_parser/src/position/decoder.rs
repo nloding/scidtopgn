@@ -144,37 +144,23 @@ pub fn decode_king(move_value: u8, scid_move: &mut ScidMove) -> Result<(), Strin
 /// From scidvspc/src/game.cpp decodeKnight()
 pub fn decode_knight(move_value: u8, scid_move: &mut ScidMove) -> Result<(), String> {
     // SCID's exact square difference array from game.cpp
-    const SQUARE_DIFF: [i8; 9] = [
+    const SQDIFF: [i8; 9] = [
         0, -17, -15, -10, -6, 6, 10, 15, 17
     ];
     
+    // SCID bounds checking - exact match
     if move_value < 1 || move_value > 8 {
-        return Err(format!("Invalid knight move value: {} (valid: 1-8)", move_value));
+        return Err(format!("Invalid knight move value: {} (SCID valid: 1-8)", move_value));
     }
     
-    let square_diff = SQUARE_DIFF[move_value as usize];
-    let target_square = scid_move.from.0 as i8 + square_diff;
+    // SCID algorithm: sm->to = sm->from + sqdiff[val];
+    let target_square = scid_move.from.0 as i8 + SQDIFF[move_value as usize];
     
-    // Enhanced bounds checking - also check for wrapping around board edges
+    // SCID doesn't do bounds checking in decodeKnight - it relies on valid input
+    // But we add basic bounds checking for safety
     if target_square < 0 || target_square > 63 {
         return Err(format!("Knight target square out of bounds: {} (from square {}, diff {})", 
-            target_square, scid_move.from.0, square_diff));
-    }
-    
-    // Additional check: Knight moves shouldn't wrap around board edges
-    let from_file = scid_move.from.0 & 0x7;
-    let from_rank = (scid_move.from.0 >> 3) & 0x7;
-    let to_file = (target_square as u8) & 0x7;
-    let to_rank = ((target_square as u8) >> 3) & 0x7;
-    
-    let file_diff = (to_file as i8 - from_file as i8).abs();
-    let rank_diff = (to_rank as i8 - from_rank as i8).abs();
-    
-    // Valid knight moves: (1,2) or (2,1) combinations only
-    if !((file_diff == 1 && rank_diff == 2) || (file_diff == 2 && rank_diff == 1)) {
-        return Err(format!("Invalid knight move geometry: from {}{} to {}{}", 
-            char::from(b'a' + from_file), from_rank + 1,
-            char::from(b'a' + to_file), to_rank + 1));
+            target_square, scid_move.from.0, SQDIFF[move_value as usize]));
     }
     
     scid_move.to = Square(target_square as u8);
@@ -184,24 +170,21 @@ pub fn decode_knight(move_value: u8, scid_move: &mut ScidMove) -> Result<(), Str
 /// Rook move decoder - exact copy of SCID's decodeRook function
 /// From scidvspc/src/game.cpp decodeRook()
 pub fn decode_rook(move_value: u8, scid_move: &mut ScidMove) -> Result<(), String> {
+    if move_value > 15 {
+        return Err(format!("Invalid rook move value: {}", move_value));
+    }
+    
     // SCID coordinate system: square = (rank << 3) | file
     let from_file = scid_move.from.0 & 0x7;        // square_Fyle(from)
     let from_rank = (scid_move.from.0 >> 3) & 0x7; // square_Rank(from)
     
+    // SCID algorithm exactly
     let target_square = if move_value >= 8 {
-        // Vertical move: move along file to different rank
-        // sm->to = square_Make(square_Fyle(sm->from), (val - 8))
-        let target_rank = move_value - 8;
-        if target_rank > 7 {
-            return Err(format!("Invalid rook target rank: {}", target_rank));
-        }
-        (target_rank << 3) | from_file
+        // This is a move along a Fyle, to a different rank:
+        // sm->to = square_Make (square_Fyle(sm->from), (val - 8));
+        ((move_value - 8) << 3) | from_file
     } else {
-        // Horizontal move: move along rank to different file
-        // sm->to = square_Make(val, square_Rank(sm->from))
-        if move_value > 7 {
-            return Err(format!("Invalid rook target file: {}", move_value));
-        }
+        // sm->to = square_Make (val, square_Rank(sm->from));
         (from_rank << 3) | move_value
     };
     
@@ -212,41 +195,32 @@ pub fn decode_rook(move_value: u8, scid_move: &mut ScidMove) -> Result<(), Strin
 /// Bishop move decoder - exact copy of SCID's decodeBishop function
 /// From scidvspc/src/game.cpp decodeBishop()
 pub fn decode_bishop(move_value: u8, scid_move: &mut ScidMove) -> Result<(), String> {
-    // SCID logic: byte fyle = (val & 7)
-    let target_file = move_value & 7;
-    let from_file = scid_move.from.0 & 0x7;        // square_Fyle(from)
-    let from_rank = (scid_move.from.0 >> 3) & 0x7; // square_Rank(from)
-    
-    // int fylediff = (int)fyle - (int)square_Fyle(sm->from)
-    let file_diff = target_file as i8 - from_file as i8;
-    
-    let target_square = if move_value >= 8 {
-        // Up-left/down-right direction move
-        // sm->to = sm->from - 7 * fylediff
-        scid_move.from.0 as i8 - 7 * file_diff
-    } else {
-        // Up-right/down-left direction move
-        // sm->to = sm->from + 9 * fylediff
-        scid_move.from.0 as i8 + 9 * file_diff
-    };
-    
-    if target_square < 0 || target_square > 63 {
-        return Err(format!("Bishop target square out of bounds: {} (from {}:{}, target file {}, diff {})", 
-            target_square, char::from(b'a' + from_file), from_rank + 1, 
-            char::from(b'a' + target_file), file_diff));
+    if move_value > 15 {
+        return Err(format!("Invalid bishop move value: {}", move_value));
     }
     
-    // Additional validation: Check that it's actually a diagonal move
-    let to_file = (target_square as u8) & 0x7;
-    let to_rank = ((target_square as u8) >> 3) & 0x7;
+    // SCID algorithm: byte fyle = (val & 7)
+    let fyle = move_value & 7;
+    let from_square = scid_move.from.0;
+    let from_file = from_square & 7;        // square_Fyle(from)
     
-    let file_distance = (to_file as i8 - from_file as i8).abs();
-    let rank_distance = (to_rank as i8 - from_rank as i8).abs();
+    // int fylediff = (int)fyle - (int)square_Fyle(sm->from)
+    let fylediff = fyle as i8 - from_file as i8;
     
-    if file_distance != rank_distance || file_distance == 0 {
-        return Err(format!("Invalid bishop move - not diagonal: from {}{} to {}{}", 
-            char::from(b'a' + from_file), from_rank + 1,
-            char::from(b'a' + to_file), to_rank + 1));
+    // SCID algorithm exactly
+    let target_square = if move_value >= 8 {
+        // It is an up-left/down-right direction move.
+        // sm->to = sm->from - 7 * fylediff;
+        from_square as i8 - 7 * fylediff
+    } else {
+        // sm->to = sm->from + 9 * fylediff;
+        from_square as i8 + 9 * fylediff
+    };
+    
+    // SCID bounds checking: if (sm->to > H8) { return ERROR_Decode;}
+    if target_square < 0 || target_square > 63 {
+        return Err(format!("Bishop target square out of bounds: {} (from square {}, diff {})", 
+                          target_square, from_square, fylediff));
     }
     
     scid_move.to = Square(target_square as u8);

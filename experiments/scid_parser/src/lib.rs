@@ -24,6 +24,9 @@ pub mod pgn;
 // Position-aware decoding modules
 pub mod position;
 
+// Variation tree building module
+pub mod variation_builder;
+
 // Re-export key types for easier access
 pub use bridge::{GameState, GameMetadata, PositionContext, ChessNotation, ChessValidation};
 pub use error::{ScidError, Result};
