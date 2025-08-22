@@ -1,6 +1,7 @@
 // Parse command implementation
 use std::fs::File;
 use std::io::BufReader;
+use std::collections::HashMap;
 use crate::si4::*;
 use crate::sn4::*;
 use crate::sg4::*;
@@ -192,6 +193,15 @@ fn display_games(si4_path: &str, sg4_data: &[u8], games: Vec<(usize, usize)>) {
         return;
     }
     
+    // Load name lookup tables from SN4 file
+    let name_lookup = match load_name_lookup_tables(si4_path) {
+        Ok(lookup) => lookup,
+        Err(e) => {
+            println!("❌ Could not load name lookup tables: {}", e);
+            return;
+        }
+    };
+    
     // Display each game
     for (game_num, (start_offset, end_offset)) in games.iter().enumerate() {
         println!("GAME {} DETAILS", game_num + 1);
@@ -226,11 +236,36 @@ fn display_games(si4_path: &str, sg4_data: &[u8], games: Vec<(usize, usize)>) {
         println!("│ Game Number             │ {} │", game_num + 1);
         println!("│ Offset                  │ {} │", game_index.offset);
         println!("│ Length                  │ {} bytes │", game_index.length);
-        println!("│ White Player ID         │ {} │", game_index.white_id);
-        println!("│ Black Player ID         │ {} │", game_index.black_id);
-        println!("│ Event ID                │ {} │", game_index.event_id);
-        println!("│ Site ID                 │ {} │", game_index.site_id);
-        println!("│ Round ID                │ {} │", game_index.round_id);
+        
+        // White Player with name lookup
+        let white_name = name_lookup.players.get(&game_index.white_id)
+            .map(|name| format!(" ({})", name))
+            .unwrap_or_default();
+        println!("│ White Player ID         │ {}{} │", game_index.white_id, white_name);
+        
+        // Black Player with name lookup
+        let black_name = name_lookup.players.get(&game_index.black_id)
+            .map(|name| format!(" ({})", name))
+            .unwrap_or_default();
+        println!("│ Black Player ID         │ {}{} │", game_index.black_id, black_name);
+        
+        // Event with name lookup
+        let event_name = name_lookup.events.get(&game_index.event_id)
+            .map(|name| format!(" ({})", name))
+            .unwrap_or_default();
+        println!("│ Event ID                │ {}{} │", game_index.event_id, event_name);
+        
+        // Site with name lookup
+        let site_name = name_lookup.sites.get(&game_index.site_id)
+            .map(|name| format!(" ({})", name))
+            .unwrap_or_default();
+        println!("│ Site ID                 │ {}{} │", game_index.site_id, site_name);
+        
+        // Round with name lookup
+        let round_name = name_lookup.rounds.get(&game_index.round_id)
+            .map(|name| format!(" ({})", name))
+            .unwrap_or_default();
+        println!("│ Round ID                │ {}{} │", game_index.round_id, round_name);
         println!("│ Date                    │ {}.{:02}.{:02} │", game_index.year, game_index.month, game_index.day);
         
         let result_str = match game_index.result {
@@ -285,4 +320,81 @@ fn display_games(si4_path: &str, sg4_data: &[u8], games: Vec<(usize, usize)>) {
         println!("└─────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘");
         println!();
     }
+}
+
+/// Name lookup tables for resolving IDs to names
+#[derive(Debug)]
+struct NameLookup {
+    players: HashMap<u32, String>,
+    events: HashMap<u32, String>,
+    sites: HashMap<u32, String>,
+    rounds: HashMap<u32, String>,
+}
+
+/// Load all name lookup tables from the SN4 file
+fn load_name_lookup_tables(si4_path: &str) -> std::io::Result<NameLookup> {
+    // Construct SN4 path from SI4 path
+    let sn4_path = si4_path.replace(".si4", ".sn4");
+    
+    let file = File::open(&sn4_path)?;
+    let mut reader = BufReader::new(file);
+    
+    // Parse SN4 header
+    let header = parse_sn4_header(&mut reader)?;
+    
+    let mut players = HashMap::new();
+    let mut events = HashMap::new();
+    let mut sites = HashMap::new();
+    let mut rounds = HashMap::new();
+    
+    // Load all players
+    let mut previous_name = String::new();
+    for i in 0..header.num_names_player {
+        if let Ok(record) = parse_name_record_sequential(&mut reader, i, header.num_names_player, header.max_frequency_player, &previous_name) {
+            players.insert(i, record.name.clone());
+            previous_name = record.name;
+        } else {
+            break;
+        }
+    }
+    
+    // Load all events
+    previous_name.clear();
+    for i in 0..header.num_names_event {
+        if let Ok(record) = parse_name_record_sequential(&mut reader, i, header.num_names_event, header.max_frequency_event, &previous_name) {
+            events.insert(i, record.name.clone());
+            previous_name = record.name;
+        } else {
+            break;
+        }
+    }
+    
+    // Load all sites
+    previous_name.clear();
+    for i in 0..header.num_names_site {
+        if let Ok(record) = parse_name_record_sequential(&mut reader, i, header.num_names_site, header.max_frequency_site, &previous_name) {
+            sites.insert(i, record.name.clone());
+            previous_name = record.name;
+        } else {
+            break;
+        }
+    }
+    
+    // Load all rounds
+    previous_name.clear();
+    for i in 0..header.num_names_round {
+        if let Ok(record) = parse_name_record_sequential(&mut reader, i, header.num_names_round, header.max_frequency_round, &previous_name) {
+            rounds.insert(i, record.name.clone());
+            previous_name = record.name;
+        } else {
+            break;
+        }
+    }
+    
+    Ok(NameLookup {
+        players,
+        events,
+        sites,
+        rounds,
+    })
 }

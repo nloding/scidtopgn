@@ -583,6 +583,112 @@ impl EnhancedPgnExporter {
         let number = eco % 100;
         format!("{}{:02}", section, number)
     }
+    
+    // NEW: Phase 3 Step 3.2 - PGN Export Integration
+    
+    /// Export from parsed game with position tracking
+    /// Phase 3 Step 3.2 from POSITION_TRACKING_IMPLEMENTATION_PLAN.md
+    pub fn export_from_parsed_game_with_positions(
+        &self,
+        game_index: &SimpleGameIndex,
+        parsed_game: &crate::sg4::StreamingGameParseState,
+        name_db: Option<&SimpleNameDatabase>
+    ) -> crate::error::Result<String> {
+        let mut pgn = String::new();
+        
+        // Generate headers
+        let headers = self.generate_headers(game_index, name_db)?;
+        for (tag, value) in headers {
+            pgn.push_str(&format!("[{} \"{}\"]\n", tag, value));
+        }
+        pgn.push('\n');
+        
+        // Generate moves using position tracker
+        let moves_section = self.generate_moves_with_positions(&parsed_game.elements, &parsed_game.position_tracker)?;
+        
+        // Apply standards formatting
+        let formatted_moves = self.standards_checker.format_pgn(&moves_section);
+        pgn.push_str(&formatted_moves);
+        
+        // Add game result
+        pgn.push_str(&format!(" {}", self.format_result(game_index.result)));
+        pgn.push('\n');
+        
+        Ok(pgn)
+    }
+    
+    fn generate_moves_with_positions(
+        &self,
+        elements: &[crate::sg4::StreamingGameElement],
+        position_tracker: &crate::sg4::PositionTracker
+    ) -> crate::error::Result<String> {
+        let mut moves = String::new();
+        let mut move_number = 1;
+        let mut is_white_move = true;
+        
+        for element in elements {
+            match element {
+                crate::sg4::StreamingGameElement::Move { offset, .. } => {
+                    if is_white_move {
+                        moves.push_str(&format!("{}.", move_number));
+                    }
+                    
+                    // Get move notation from position tracker
+                    let move_notation = if let Some(scid_move) = position_tracker.get_move_at_position(*offset) {
+                        if let Some(position) = position_tracker.get_position_at_offset(*offset) {
+                            scid_move.to_algebraic(position)
+                        } else {
+                            scid_move.to_algebraic(position_tracker.current_position())
+                        }
+                    } else {
+                        // Fallback for undecoded moves
+                        match element {
+                            crate::sg4::StreamingGameElement::Move { raw_bytes, .. } if !raw_bytes.is_empty() => {
+                                format!("{{undecoded:0x{:02X}}}", raw_bytes[0])
+                            }
+                            _ => "{undecoded}".to_string()
+                        }
+                    };
+                    
+                    moves.push_str(&move_notation);
+                    moves.push(' ');
+                    
+                    if !is_white_move {
+                        move_number += 1;
+                    }
+                    is_white_move = !is_white_move;
+                }
+                crate::sg4::StreamingGameElement::Comment { text, .. } => {
+                    if self.options.include_comments {
+                        moves.push_str(&format!(" {{{}}} ", text));
+                    }
+                }
+                crate::sg4::StreamingGameElement::Nag { nag_value, .. } => {
+                    if self.options.include_nags {
+                        moves.push_str(&format!("${} ", nag_value));
+                    }
+                }
+                crate::sg4::StreamingGameElement::VariationStart { .. } => {
+                    if self.options.include_variations {
+                        moves.push_str("( ");
+                    }
+                }
+                crate::sg4::StreamingGameElement::VariationEnd { .. } => {
+                    if self.options.include_variations {
+                        moves.push_str(") ");
+                    }
+                }
+                crate::sg4::StreamingGameElement::GameEnd { .. } => {
+                    break; // End of game
+                }
+                _ => {
+                    // Handle other elements as needed
+                }
+            }
+        }
+        
+        Ok(moves.trim_end().to_string())
+    }
 }
 
 #[cfg(test)]

@@ -78,16 +78,33 @@ pub struct ScidPosition {
     /// CRITICAL: Must match SCID piece numbering exactly (see below)
     piece_lists: [[Square; 16]; 2],
     
+    /// Number of pieces for each color
+    piece_counts: [usize; 2],
+    
     /// Reverse lookup: For each square, which piece list index
     /// If square contains White piece #5, list_pos[square] = 5
     list_pos: [u8; 64],
     
     /// Game state
     pub to_move: Color,
-    castling_rights: u8,  // Bitfield: WK=1, WQ=2, BK=4, BQ=8
-    en_passant_square: Option<Square>,
-    half_move_clock: u8,
-    full_move_number: u16,
+    
+    // NEW: Add game state tracking as per Phase 1 Step 1.1
+    en_passant_target: Option<Square>,
+    castling_rights: CastlingRights,
+    halfmove_clock: u16,
+    fullmove_number: u16,
+    
+    // NEW: Add move history for debugging
+    move_history: Vec<ScidMove>,
+    position_hash: u64, // For position validation
+}
+
+#[derive(Debug, Clone, Copy, Hash)]
+pub struct CastlingRights {
+    pub white_kingside: bool,
+    pub white_queenside: bool,
+    pub black_kingside: bool,
+    pub black_queenside: bool,
 }
 
 /// SCID piece numbering (CRITICAL - must match exactly)
@@ -138,12 +155,21 @@ impl ScidPosition {
         let mut position = ScidPosition {
             board: [PieceType::Empty; 64],
             piece_lists: [[Square(0); 16]; 2],
+            piece_counts: [16, 16], // Starting with 16 pieces each
             list_pos: [0; 64],
             to_move: Color::White,
-            castling_rights: 0b1111, // All castling rights initially available
-            en_passant_square: None,
-            half_move_clock: 0,
-            full_move_number: 1,
+            // NEW: Phase 1 Step 1.1 - proper game state initialization
+            en_passant_target: None,
+            castling_rights: CastlingRights {
+                white_kingside: true,
+                white_queenside: true,
+                black_kingside: true,
+                black_queenside: true,
+            },
+            halfmove_clock: 0,
+            fullmove_number: 1,
+            move_history: Vec::new(),
+            position_hash: 0, // Will be calculated
         };
         
         // Initialize White pieces according to SCID numbering
@@ -159,6 +185,9 @@ impl ScidPosition {
             position.piece_lists[Color::Black as usize][piece_index] = *square;
             position.list_pos[square.0 as usize] = piece_index as u8;
         }
+        
+        // Calculate initial position hash
+        position.position_hash = position.calculate_hash();
         
         position
     }
@@ -180,32 +209,23 @@ impl ScidPosition {
         &self.piece_lists[color as usize]
     }
     
-    /// Apply a move and update position
-    pub fn do_move(&mut self, mv: &ScidMove) -> Result<(), String> {
-        // Validate move bounds
-        if mv.from.0 >= 64 || mv.to.0 >= 64 {
-            return Err("Move squares out of bounds".to_string());
-        }
+    /// Apply move and update all position state
+    /// Based on SCID's Position::DoMove() from position.cpp
+    pub fn do_move(&mut self, scid_move: &ScidMove) -> Result<(), String> {
+        // Validate move before applying
+        self.validate_move_legal(scid_move)?;
         
-        // Validate moving piece exists
-        if self.board[mv.from.0 as usize] != mv.moving_piece {
-            return Err(format!("No {} at source square", mv.moving_piece.to_string()));
-        }
+        // Store move in history
+        self.move_history.push(scid_move.clone());
         
-        // Update board
-        self.board[mv.from.0 as usize] = PieceType::Empty;
-        self.board[mv.to.0 as usize] = if mv.promote != PieceType::Empty {
-            mv.promote
-        } else {
-            mv.moving_piece
-        };
+        // Apply the move to board
+        self.apply_move_to_board(scid_move)?;
         
-        // Update piece list
-        let color_index = self.to_move as usize;
-        self.piece_lists[color_index][mv.piece_num as usize] = mv.to;
+        // Update piece lists
+        self.update_piece_lists_after_move(scid_move)?;
         
-        // Update reverse lookup
-        self.list_pos[mv.to.0 as usize] = mv.piece_num;
+        // Update game state
+        self.update_game_state_after_move(scid_move)?;
         
         // Switch turn
         self.to_move = match self.to_move {
@@ -215,9 +235,137 @@ impl ScidPosition {
         
         // Update move counters
         if self.to_move == Color::White {
-            self.full_move_number += 1;
+            self.fullmove_number += 1;
         }
         
+        // Update position hash
+        self.position_hash = self.calculate_hash();
+        
+        // Validate position integrity
+        self.validate_position()?;
+        
+        Ok(())
+    }
+    
+    fn validate_move_legal(&self, scid_move: &ScidMove) -> Result<(), String> {
+        // Validate move bounds
+        if scid_move.from.0 >= 64 || scid_move.to.0 >= 64 {
+            return Err("Move squares out of bounds".to_string());
+        }
+        
+        // Validate moving piece exists
+        if self.board[scid_move.from.0 as usize] != scid_move.moving_piece {
+            return Err(format!("No {} at source square", scid_move.moving_piece.to_string()));
+        }
+        
+        // Validate piece number is in range
+        if scid_move.piece_num as usize >= 16 {
+            return Err(format!("Invalid piece number: {}", scid_move.piece_num));
+        }
+        
+        // Validate piece is at expected location
+        let color_idx = self.to_move as usize;
+        let expected_square = self.piece_lists[color_idx][scid_move.piece_num as usize];
+        if expected_square != scid_move.from {
+            return Err(format!("Piece {} not at expected location", scid_move.piece_num));
+        }
+        
+        Ok(())
+    }
+    
+    fn apply_move_to_board(&mut self, scid_move: &ScidMove) -> Result<(), String> {
+        // Clear source square
+        self.board[scid_move.from.0 as usize] = PieceType::Empty;
+        
+        // Handle special moves
+        match scid_move.moving_piece {
+            PieceType::King => {
+                // Check for castling
+                if (scid_move.from.0 as i8 - scid_move.to.0 as i8).abs() == 2 {
+                    self.handle_castling_move(scid_move)?;
+                }
+            }
+            PieceType::Pawn => {
+                // Handle en passant capture
+                if self.en_passant_target == Some(scid_move.to) {
+                    self.handle_en_passant_capture(scid_move)?;
+                }
+                // Handle pawn promotion
+                if scid_move.promote != PieceType::Empty {
+                    self.board[scid_move.to.0 as usize] = scid_move.promote;
+                    return Ok(());
+                }
+            }
+            _ => {}
+        }
+        
+        // Place piece on target square
+        self.board[scid_move.to.0 as usize] = scid_move.moving_piece;
+        
+        Ok(())
+    }
+    
+    fn update_piece_lists_after_move(&mut self, scid_move: &ScidMove) -> Result<(), String> {
+        let color_idx = self.to_move as usize;
+        let piece_num = scid_move.piece_num as usize;
+        
+        // Update moving piece location in piece list
+        if piece_num >= 16 {
+            return Err(format!("Invalid piece number: {}", piece_num));
+        }
+        
+        // Handle captures - remove captured piece from opponent's list
+        if scid_move.captured_piece != PieceType::Empty {
+            self.remove_captured_piece_from_list(scid_move)?;
+        }
+        
+        // Update piece location
+        self.piece_lists[color_idx][piece_num] = scid_move.to;
+        
+        // Update reverse lookup
+        self.list_pos[scid_move.to.0 as usize] = scid_move.piece_num;
+        
+        Ok(())
+    }
+    
+    fn remove_captured_piece_from_list(&mut self, scid_move: &ScidMove) -> Result<(), String> {
+        let opponent_color = match self.to_move {
+            Color::White => Color::Black,
+            Color::Black => Color::White,
+        };
+        let opponent_idx = opponent_color as usize;
+        
+        // Find captured piece in opponent's list
+        for i in 0..self.piece_counts[opponent_idx] {
+            if self.piece_lists[opponent_idx][i] == scid_move.to {
+                // Remove piece by moving last piece to this position
+                let last_piece_idx = self.piece_counts[opponent_idx] - 1;
+                self.piece_lists[opponent_idx][i] = self.piece_lists[opponent_idx][last_piece_idx];
+                self.piece_counts[opponent_idx] -= 1;
+                return Ok(());
+            }
+        }
+        
+        Err(format!("Could not find captured piece at {}", scid_move.to.to_algebraic()))
+    }
+    
+    fn handle_castling_move(&mut self, _scid_move: &ScidMove) -> Result<(), String> {
+        // TODO: Implement castling move handling
+        // This is a placeholder for now
+        Ok(())
+    }
+    
+    fn handle_en_passant_capture(&mut self, _scid_move: &ScidMove) -> Result<(), String> {
+        // TODO: Implement en passant capture handling
+        // This is a placeholder for now
+        Ok(())
+    }
+    
+    fn update_game_state_after_move(&mut self, _scid_move: &ScidMove) -> Result<(), String> {
+        // TODO: Implement game state updates (castling rights, en passant, halfmove clock)
+        // This is a placeholder for now
+        self.halfmove_clock += 1;
+        self.en_passant_target = None; // Reset en passant (simplified for now)
         Ok(())
     }
     
@@ -232,9 +380,79 @@ impl ScidPosition {
         }
     }
     
+    /// Check if a move would be legal in the current position
+    /// Phase 2 Step 2.2 from POSITION_TRACKING_IMPLEMENTATION_PLAN.md
+    pub fn is_move_legal(&self, scid_move: &ScidMove) -> bool {
+        // Basic validation
+        if scid_move.from.0 >= 64 || scid_move.to.0 >= 64 {
+            return false;
+        }
+        
+        // Check if piece exists at from square
+        let piece_at_from = self.board[scid_move.from.0 as usize];
+        if piece_at_from != scid_move.moving_piece {
+            return false;
+        }
+        
+        // Check if piece belongs to current player
+        // (This would require adding color information to pieces)
+        
+        // Check if target square is valid
+        let piece_at_to = self.board[scid_move.to.0 as usize];
+        if piece_at_to != PieceType::Empty && piece_at_to == scid_move.captured_piece {
+            // Capture is consistent
+        } else if piece_at_to == PieceType::Empty && scid_move.captured_piece == PieceType::Empty {
+            // Non-capture is consistent
+        } else {
+            return false;
+        }
+        
+        true
+    }
+    
     /// Get the current full move number
     pub fn full_move_number(&self) -> u16 {
-        self.full_move_number
+        self.fullmove_number
+    }
+    
+    // NEW: Phase 1 Step 1.1 - Position validation methods
+    
+    /// Validate position integrity after move
+    pub fn validate_position(&self) -> Result<(), String> {
+        // Check board-piece list consistency
+        for color in [Color::White, Color::Black] {
+            let color_idx = color as usize;
+            for piece_idx in 0..self.piece_counts[color_idx] {
+                if piece_idx >= 16 {
+                    break; // Safety check
+                }
+                let square = self.piece_lists[color_idx][piece_idx];
+                if square.0 >= 64 {
+                    return Err(format!("Invalid square {} for {} piece {}", 
+                        square.0, color.to_string(), piece_idx));
+                }
+                let piece_on_board = self.board[square.0 as usize];
+                
+                if piece_on_board == PieceType::Empty {
+                    return Err(format!("Piece list inconsistency: {} piece {} at square {} but board shows empty", 
+                        color.to_string(), piece_idx, square.to_algebraic()));
+                }
+            }
+        }
+        Ok(())
+    }
+    
+    /// Calculate position hash for debugging
+    pub fn calculate_hash(&self) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        
+        let mut hasher = DefaultHasher::new();
+        self.board.hash(&mut hasher);
+        self.to_move.hash(&mut hasher);
+        self.castling_rights.hash(&mut hasher);
+        self.en_passant_target.hash(&mut hasher);
+        hasher.finish()
     }
 }
 
@@ -245,6 +463,9 @@ pub mod tests;
 pub mod integration;
 pub mod byte_stream;
 pub mod state_manager;
+pub mod debug;
+pub mod performance;
+pub mod optimization;
 
 // Re-export key functions
 pub use decoder::{decode_move, decode_move_with_stream, decode_queen_with_stream};

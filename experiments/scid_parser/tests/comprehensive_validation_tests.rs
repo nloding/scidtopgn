@@ -82,8 +82,8 @@ mod tests {
                     // Validate first move specifically
                     if total_moves == 1 {
                         let desc = decoded_move.interpretation.description();
-                        assert!(desc.contains("e2-e4") || desc.contains("Pawn") && desc.contains("e4"), 
-                            "First move should be pawn e2-e4, got: {}", desc);
+                        assert!(desc == "e4" || desc.contains("e2-e4") || (desc.contains("Pawn") && desc.contains("e4")), 
+                            "First move should be pawn e2-e4 or e4, got: {}", desc);
                         println!("   ✅ First move tracked: {}", desc);
                     }
                 }

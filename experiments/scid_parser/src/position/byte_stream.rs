@@ -61,11 +61,11 @@ impl<'a> ScidByteStream<'a> {
     
     /// Peek at next byte without advancing position
     /// Not present in SCID's ByteBuffer but useful for our parsing logic
-    pub fn peek_byte(&self) -> Option<u8> {
+    pub fn peek_byte(&self) -> Result<u8, String> {
         if self.read_pos >= self.byte_count {
-            None
+            Err("No bytes available for peeking".to_string())
         } else {
-            Some(self.buffer[self.read_pos])
+            Ok(self.buffer[self.read_pos])
         }
     }
     
@@ -73,6 +73,12 @@ impl<'a> ScidByteStream<'a> {
     /// Equivalent to accessing SCID's ReadPos directly
     pub fn position(&self) -> usize {
         self.read_pos
+    }
+    
+    /// Set read position
+    /// Required for position tracker implementation
+    pub fn set_position(&mut self, pos: usize) {
+        self.read_pos = pos.min(self.byte_count);
     }
     
     /// Check if more bytes available
@@ -172,7 +178,7 @@ mod tests {
         assert_eq!(stream.total_bytes(), 0);
         assert_eq!(stream.bytes_remaining(), 0);
         assert!(!stream.has_bytes());
-        assert!(stream.peek_byte().is_none());
+        assert!(stream.peek_byte().is_err());
     }
     
     #[test]

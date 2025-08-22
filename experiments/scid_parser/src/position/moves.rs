@@ -88,7 +88,7 @@ impl ScidMove {
 
 /// Square representation (0-63)
 /// SCID square numbering: a1=0, b1=1, c1=2, ..., h8=63
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash)]
 pub struct Square(pub u8);
 
 impl Square {
@@ -157,7 +157,7 @@ impl Square {
 }
 
 // Constants for piece types
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash)]
 pub enum PieceType {
     Empty,
     King,
@@ -182,7 +182,7 @@ impl PieceType {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Hash)]
 pub enum Color {
     White = 0,
     Black = 1,
@@ -193,6 +193,13 @@ impl Color {
         match self {
             Color::White => Color::Black,
             Color::Black => Color::White,
+        }
+    }
+    
+    pub fn to_string(&self) -> &'static str {
+        match self {
+            Color::White => "White",
+            Color::Black => "Black",
         }
     }
 }
