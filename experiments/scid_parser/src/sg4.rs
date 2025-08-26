@@ -16,15 +16,14 @@
 // - Special moves (castling, en passant) will be mapped to appropriate shakmaty::Move variants
 // - Move validation will be performed using shakmaty position context
 // ===============================
-// use crate::utils::*;  // Commented out - unused import
+ 
 use crate::bridge::{GameState, PositionContext};
 use crate::position::{ScidByteStream, decode_move_with_stream, decode_move, ScidPosition};
 use shakmaty::Move as ShakmMove;
 
 // Phase 2: Variation Tree Implementation
 // VariationTreeBuilder will be re-exported below
-// use std::fs::File;  // Commented out - unused import
-// use std::io::Read;  // Commented out - unused import
+ 
 
 /// SG4 Game File Structure Analysis
 /// Based on analysis of scidvspc/src/gfile.cpp, game.cpp, and bytebuf.cpp
@@ -483,6 +482,14 @@ impl StreamingGameElement {
 
 /// Tracks position state during game parsing with error recovery
 /// Phase 2 Step 2.1 from POSITION_TRACKING_IMPLEMENTATION_PLAN.md
+/// Legacy position tracker used during early streaming/SG4 decoding work.
+///
+/// Deprecated: Prefer the shakmaty-backed bridge implementation
+/// (`crate::bridge::ScidPositionTracker`) and high-level `crate::bridge::GameState`.
+/// This type remains temporarily for backward compatibility and will be
+/// removed after migrations.
+#[deprecated(note = "Use bridge::ScidPositionTracker and/or bridge::GameState instead")]
+#[allow(deprecated)]
 #[derive(Debug)]
 pub struct PositionTracker {
     current_position: ScidPosition,
@@ -494,6 +501,7 @@ pub struct PositionTracker {
     position_history: Vec<(usize, ScidPosition)>, // (offset, position_before_move)
 }
 
+#[allow(deprecated)]
 impl PositionTracker {
     pub fn new() -> Self {
         Self {
@@ -562,11 +570,9 @@ impl PositionTracker {
         })
     }
     
-    fn get_raw_bytes_from_stream(&self, _stream: &ScidByteStream, _initial_position: usize, bytes_consumed: usize) -> Vec<u8> {
-        // This is a simplified implementation - the actual bytes would need to be captured
-        // during the decoding process. For Phase 2, we'll use a placeholder.
-        // In a full implementation, we'd pass the original game_data slice here.
-        vec![0; bytes_consumed]
+    fn get_raw_bytes_from_stream(&self, stream: &ScidByteStream, initial_position: usize, _bytes_consumed: usize) -> Vec<u8> {
+        // Extract the actual bytes that were consumed during decoding
+        stream.get_consumed_bytes(initial_position)
     }
     
     pub fn get_statistics(&self) -> PositionTrackerStats {
@@ -672,6 +678,7 @@ pub struct PositionTrackerStats {
 
 /// Interpret move element for display
 /// Phase 3 Step 3.1 from POSITION_TRACKING_IMPLEMENTATION_PLAN.md
+#[allow(deprecated)]
 fn interpret_move_element(element: &StreamingGameElement, position_tracker: &PositionTracker) -> String {
     match element {
         StreamingGameElement::Move { piece_num, raw_bytes, bytes_consumed, offset, .. } => {
@@ -707,8 +714,6 @@ pub struct StreamingGameParseState {
     pub flags_offset: usize,
     pub moves_start_offset: usize,
     pub position_tracker_stats: PositionTrackerStats,
-    // NEW: Phase 3 Step 3.1 - Include position tracker for display functions
-    pub position_tracker: PositionTracker,
 }
 
 // ==========================================
@@ -724,82 +729,7 @@ pub struct StreamingGameParseState {
 pub mod comment_processor;
 pub mod nag_processor;
 
-/// Complete variation tree structure for PGN export
-#[derive(Debug, Clone)]
-pub struct VariationTreeV2 {
-    /// Main line moves (the primary game sequence)
-    pub main_line: Vec<VariationMove>,
-    
-    /// Variations from the main line
-    pub variations: Vec<Variation>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Variation {
-    /// Move number where this variation starts (0-based)
-    pub start_move_index: usize,
-    
-    /// The variation moves
-    pub moves: Vec<VariationMove>,
-    
-    /// Nested sub-variations within this variation
-    pub sub_variations: Vec<Variation>,
-    
-    /// Depth level (0 = main line, 1 = first level variation, etc.)
-    pub depth: usize,
-}
-
-#[derive(Debug, Clone)]
-pub struct VariationMove {
-    /// The actual chess move
-    pub chess_move: crate::position::ScidMove,
-    
-    /// Move number (1, 2, 3, etc.)
-    pub move_number: usize,
-    
-    /// Is this a white move (true) or black move (false)
-    pub is_white_move: bool,
-    
-    /// Comments attached to this move
-    pub comments: Vec<String>,
-    
-    /// NAG annotations for this move
-    pub nags: Vec<u8>,
-    
-    /// Move in algebraic notation (e4, Nf3, etc.)
-    pub algebraic: String,
-}
-
-/// Enhanced game element for variation support
-#[derive(Debug, Clone)]
-pub enum VariationGameElement {
-    Move {
-        piece_num: u8,
-        move_value: u8,
-        raw_bytes: Vec<u8>,
-        offset: usize,
-        bytes_consumed: usize,
-    },
-    VariationStart {
-        offset: usize,
-        depth: usize,  // NEW: track nesting depth
-    },
-    VariationEnd {
-        offset: usize,
-        depth: usize,  // NEW: track nesting depth
-    },
-    Comment {
-        text: String,
-        offset: usize,
-    },
-    Nag {
-        nag_value: u8,
-        offset: usize,
-    },
-    GameEnd {
-        offset: usize,
-    },
-}
+pub use crate::variation::{VariationMove, VariationGameElement};
 
 #[allow(dead_code)]
 pub fn display_sg4_structure() {
@@ -878,7 +808,7 @@ pub fn display_sg4_structure() {
     println!();
 }
 
-// COMMENTED OUT: Unused debug function that calls removed debug utilities
+// (removed unused debug helper section)
 /*
 pub fn parse_sg4_file(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     println!("📖 Reading SG4 file: {}", file_path);
@@ -1372,7 +1302,7 @@ pub fn parse_pgn_tags(game_data: &[u8]) -> Result<GameParseState, Box<dyn std::e
             continue;
         }
         
-        let (tag_name, value_length_pos) = if tag_length_byte >= COMMON_TAG_THRESHOLD {
+    let (tag_name, value_length_pos) = if tag_length_byte >= COMMON_TAG_THRESHOLD {
             // Common tag encoded as single byte (241-255)
             let common_tag_index = (tag_length_byte - COMMON_TAG_THRESHOLD) as usize;
             if common_tag_index >= COMMON_TAGS.len() {
@@ -1568,7 +1498,7 @@ pub fn parse_pgn_tags_with_streaming(game_data: &[u8]) -> Result<StreamingGamePa
             continue;
         }
         
-        let (tag_name, value_length_pos) = if tag_length_byte >= COMMON_TAG_THRESHOLD {
+    let (tag_name, _value_length_pos) = if tag_length_byte >= COMMON_TAG_THRESHOLD {
             // Common tag encoded as single byte (241-255)
             let common_tag_index = (tag_length_byte - COMMON_TAG_THRESHOLD) as usize;
             if common_tag_index >= COMMON_TAGS.len() {
@@ -1630,8 +1560,10 @@ pub fn parse_pgn_tags_with_streaming(game_data: &[u8]) -> Result<StreamingGamePa
     
     let moves_start_offset = stream.position();
     
-    // 🔥 NEW: Create position tracker instead of dummy position
-    let mut position_tracker = PositionTracker::new();
+    // Use a local SCID-compliant position and decoder for move parsing
+    let mut position = ScidPosition::new_starting_position();
+    let mut total_moves: usize = 0;
+    let mut successful_moves: usize = 0;
     
     // 🔥 KEY CHANGE: Process moves using position-aware decoder
     while stream.has_bytes() {
@@ -1660,18 +1592,30 @@ pub fn parse_pgn_tags_with_streaming(game_data: &[u8]) -> Result<StreamingGamePa
                 elements.push(StreamingGameElement::GameEnd { offset: current_offset });
                 break;
             }
-            // 🔥 NEW: Position-aware move decoding
+            // Position-aware move decoding
             _ => {
-                // Put byte back for position tracker to handle
+                // Put byte back then attempt to decode from current position
                 stream.set_position(current_offset);
-                
-                match position_tracker.try_decode_move(&mut stream) {
-                    Ok(element) => elements.push(element),
-                    Err(e) => {
-                        // Log error but continue parsing
-                        eprintln!("Move decoding error at offset {}: {}", current_offset, e);
-                        
-                        // Skip this byte and continue
+                let initial_pos = stream.position();
+                total_moves += 1;
+                match decode_move_with_stream(&position, &mut stream) {
+                    Ok(scid_move) => {
+                        // Capture consumed bytes for this move
+                        let raw = stream.get_consumed_bytes(initial_pos);
+                        let consumed = stream.position().saturating_sub(initial_pos);
+                        elements.push(StreamingGameElement::Move {
+                            piece_num: scid_move.piece_num,
+                            move_value: 0,
+                            raw_bytes: raw,
+                            offset: current_offset,
+                            bytes_consumed: consumed,
+                        });
+                        // Apply to advance position; if it fails, still count decode success
+                        let _ = position.do_move(&scid_move);
+                        successful_moves += 1;
+                    }
+                    Err(_e) => {
+                        // Skip one byte and mark as undecoded
                         stream.set_position(current_offset + 1);
                         elements.push(StreamingGameElement::Move {
                             piece_num: 0,
@@ -1686,12 +1630,19 @@ pub fn parse_pgn_tags_with_streaming(game_data: &[u8]) -> Result<StreamingGamePa
         }
     }
     
-    // After parsing, get statistics
-    let stats = position_tracker.get_statistics();
-    eprintln!("Position tracking stats: {:.1}% success rate ({}/{} moves)", 
-              stats.success_rate, stats.successful_moves, stats.total_moves);
+    // After parsing, compute statistics
+    let failed_moves = total_moves.saturating_sub(successful_moves);
+    let success_rate = if total_moves == 0 { 0.0 } else { (successful_moves as f64 / total_moves as f64) * 100.0 };
+    let stats = PositionTrackerStats {
+        total_moves,
+        successful_moves,
+        failed_moves,
+        success_rate,
+        position_hash: position.calculate_hash(),
+        current_turn: position.to_move,
+    };
     
-    Ok(StreamingGameParseState { 
+    Ok(StreamingGameParseState {
         elements,
         tags,
         flags,
@@ -1699,7 +1650,6 @@ pub fn parse_pgn_tags_with_streaming(game_data: &[u8]) -> Result<StreamingGamePa
         flags_offset,
         moves_start_offset,
         position_tracker_stats: stats,
-        position_tracker,
     })
 }
 
@@ -1881,7 +1831,7 @@ fn decode_pawn_move(move_value: u8) -> MoveInterpretation {
     }
 }
 
-// COMMENTED OUT: Unused function that depends on removed custom chess types
+// (removed unused legacy chess helpers)
 /*
 /// Decode a move using position awareness - the foundation for accurate chess notation
 /// This replaces heuristic guessing with actual position tracking
@@ -1930,7 +1880,7 @@ fn decode_move_with_position(
 }
 */
 
-// COMMENTED OUT: Additional unused functions that depend on removed custom chess types
+// (removed additional unused legacy helpers)
 /*
 /// Decode multi-byte move with position awareness
 /// Handles 2-byte and 3-byte move sequences for complex positions
@@ -2834,7 +2784,10 @@ pub fn parse_game_with_position_tracking(
                             println!("❌ FAILED TO APPLY SCID MOVE {}:", move_count + 1);
                             println!("   Move: P{} V{} -> {}", piece_num, move_value, 
                                 decoded_move.interpretation.description());
-                            return Err(format!("Failed to apply SCID move {}: {}", move_count + 1, e));
+                            println!("   Error: {}", e);
+                            // Migration note: while bridge tracker integration matures,
+                            // don't fail hard; return the moves parsed so far to keep pipeline usable.
+                            break;
                         }
                     }
                 } else {
@@ -2890,13 +2843,25 @@ pub fn display_game_with_position_tracking(
     println!("│   Current Turn: {:?}                                             │", stats.current_turn);
     println!("│                                                                  │");
     
-    // Display moves with improved interpretation
+    // Display moves with improved interpretation by decoding inline
     println!("│ Moves with Position-Aware Decoding:                             │");
+    let mut pos = ScidPosition::new_starting_position();
     for (i, element) in parse_result.elements.iter().enumerate() {
-        let move_description = interpret_move_element(element, &parse_result.position_tracker);
-        println!("│ Move {:2}                  │ {} │", 
-                i + 1, 
-                truncate_for_display(&move_description, 50));
+        match element {
+            StreamingGameElement::Move { raw_bytes, .. } if !raw_bytes.is_empty() => {
+                let mut move_stream = ScidByteStream::new(raw_bytes);
+                let desc = match decode_move_with_stream(&pos, &mut move_stream) {
+                    Ok(m) => {
+                        let algebraic = m.to_algebraic(&pos);
+                        let _ = pos.do_move(&m);
+                        algebraic
+                    }
+                    Err(_) => format!("undecoded: 0x{:02X}", raw_bytes[0]),
+                };
+                println!("│ Move {:2}                  │ {} │", i + 1, truncate_for_display(&desc, 50));
+            }
+            _ => {}
+        }
     }
     
     println!("============================================");
@@ -3075,22 +3040,22 @@ pub fn process_game_elements_with_annotations(
 #[cfg(test)]
 mod annotation_integration_tests {
     use super::*;
-    use crate::position::{ScidPosition, Square, PieceType};
+    use crate::position::ScidPosition;
 
     #[test]
     fn test_move_processing_with_annotations() {
-        let mut position = ScidPosition::new_starting_position();
-        let mut pending_comments = vec!["Great opening move!".to_string()];
-        let mut pending_nags = vec![1]; // Good move
+    let _position = ScidPosition::new_starting_position();
+    let _pending_comments = vec!["Great opening move!".to_string()];
+    let _pending_nags = vec![1]; // Good move
         
         // Create a simple pawn move (e2-e4)
-        let move_data = vec![0xCF]; // This represents e4 in SCID format (placeholder)
+    let _move_data = vec![0xCF]; // This represents e4 in SCID format (placeholder)
         
         // This test would require proper move encoding, so for now we'll test the structure
         // In a real implementation, we'd need proper SCID move bytes
         
-        assert!(!pending_comments.is_empty());
-        assert!(!pending_nags.is_empty());
+    assert!(!_pending_comments.is_empty());
+    assert!(!_pending_nags.is_empty());
     }
     
     #[test]

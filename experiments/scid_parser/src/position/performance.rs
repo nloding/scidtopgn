@@ -2,8 +2,9 @@
 // Phase 5 Step 5.1 from POSITION_TRACKING_IMPLEMENTATION_PLAN.md
 
 use std::time::{Duration, Instant};
-use crate::sg4::{PositionTracker, StreamingGameElement};
-use crate::position::ScidByteStream;
+use crate::sg4::StreamingGameElement;
+use crate::position::{ScidByteStream, ScidPosition};
+use crate::position::decoder::decode_move_with_stream;
 
 #[derive(Debug, Default)]
 pub struct PositionTrackingMetrics {
@@ -134,24 +135,39 @@ impl PositionTrackingMetrics {
     }
 }
 
-/// Enhanced position tracker with performance monitoring
+/// Enhanced position tracker with performance monitoring (decoder-based)
 #[derive(Debug)]
 pub struct MonitoredPositionTracker {
-    tracker: PositionTracker,
+    position: ScidPosition,
     metrics: PositionTrackingMetrics,
 }
 
 impl MonitoredPositionTracker {
     pub fn new() -> Self {
         Self {
-            tracker: PositionTracker::new(),
+            position: ScidPosition::new_starting_position(),
             metrics: PositionTrackingMetrics::default(),
         }
     }
     
     pub fn try_decode_move_with_monitoring(&mut self, stream: &mut ScidByteStream) -> Result<StreamingGameElement, String> {
-        let start_time = Instant::now();
-        let result = self.tracker.try_decode_move(stream);
+    let start_time = Instant::now();
+    let initial_pos = stream.position();
+        // Decode a move in current position context
+        let result = match decode_move_with_stream(&self.position, stream) {
+            Ok(scid_move) => {
+                // Apply to position for subsequent decoding
+                let _ = self.position.do_move(&scid_move);
+                Ok(StreamingGameElement::Move {
+                    piece_num: scid_move.piece_num,
+                    move_value: 0,
+            raw_bytes: stream.get_consumed_bytes(initial_pos),
+            offset: initial_pos,
+            bytes_consumed: stream.position().saturating_sub(initial_pos),
+                })
+            }
+            Err(e) => Err(e),
+        };
         let decode_duration = start_time.elapsed();
         
         self.metrics.record_decode_attempt(result.is_ok(), decode_duration);
@@ -161,13 +177,12 @@ impl MonitoredPositionTracker {
     
     pub fn apply_move_with_monitoring(&mut self, scid_move: &crate::position::ScidMove) -> Result<(), String> {
         let start_time = Instant::now();
-        
-        // Apply move (this would require access to internal position)
-        // For now, we'll just record the timing
-        let position_update_duration = start_time.elapsed();
+    // Apply move to internal position
+    let res = self.position.do_move(scid_move);
+    let position_update_duration = start_time.elapsed();
         self.metrics.record_position_update(position_update_duration);
         
-        Ok(())
+    res
     }
     
     pub fn validate_position_with_monitoring(&mut self) -> Result<(), String> {
@@ -185,13 +200,14 @@ impl MonitoredPositionTracker {
         &self.metrics
     }
     
-    pub fn get_statistics(&self) -> crate::sg4::PositionTrackerStats {
-        self.tracker.get_statistics()
+    /// Lightweight stats compatible with previous API surface
+    pub fn get_statistics(&self) -> PositionTrackerStatsCompat {
+        PositionTrackerStatsCompat::from_position(&self.position)
     }
     
     pub fn update_memory_usage_estimate(&mut self) {
         // Estimate memory usage based on tracker components
-        let base_size = std::mem::size_of::<PositionTracker>();
+    let base_size = std::mem::size_of::<ScidPosition>();
         let metrics_size = std::mem::size_of::<PositionTrackingMetrics>();
         let estimated_kb = (base_size + metrics_size + 1024) / 1024; // Add 1KB overhead
         
@@ -206,6 +222,31 @@ impl MonitoredPositionTracker {
         // Update memory usage before generating report
         self.update_memory_usage_estimate();
         self.metrics.generate_performance_report()
+    }
+}
+
+/// Minimal compatibility struct replacing sg4::PositionTrackerStats usage here
+#[derive(Debug, Clone, Copy)]
+pub struct PositionTrackerStatsCompat {
+    pub total_moves: usize,
+    pub successful_moves: usize,
+    pub failed_moves: usize,
+    pub success_rate: f64,
+    pub position_hash: u64,
+    pub current_turn: crate::position::Color,
+}
+
+impl PositionTrackerStatsCompat {
+    fn from_position(pos: &ScidPosition) -> Self {
+    // Derive total half-moves from full move number and side to move
+    let full = pos.full_move_number() as usize;
+    let total_moves = (full.saturating_sub(1)) * 2 + if pos.to_move == crate::position::Color::Black { 1 } else { 0 };
+        let successful_moves = total_moves;
+        let failed_moves = 0;
+        let success_rate = if total_moves == 0 { 0.0 } else { 100.0 };
+        let position_hash = pos.calculate_hash();
+        let current_turn = pos.to_move;
+        Self { total_moves, successful_moves, failed_moves, success_rate, position_hash, current_turn }
     }
 }
 

@@ -75,6 +75,16 @@ impl<'a> ScidByteStream<'a> {
         self.read_pos
     }
     
+    /// Get bytes consumed from initial_position to current position
+    pub fn get_consumed_bytes(&self, initial_position: usize) -> Vec<u8> {
+        if initial_position >= self.buffer.len() || initial_position >= self.read_pos {
+            return vec![];
+        }
+        
+        let end_pos = std::cmp::min(self.read_pos, self.buffer.len());
+        self.buffer[initial_position..end_pos].to_vec()
+    }
+    
     /// Set read position
     /// Required for position tracker implementation
     pub fn set_position(&mut self, pos: usize) {

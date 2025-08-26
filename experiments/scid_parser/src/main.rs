@@ -15,6 +15,7 @@ mod sn4;
 
 // Position-aware decoding modules
 mod position;
+mod variation;
 
 // Shakmaty integration modules
 mod bridge;

@@ -91,7 +91,7 @@ mod tests {
         assert_eq!(white_turn, true);
         
         // Restore state
-        let (restored_pos, restored_move, restored_turn) = manager.restore_state().unwrap();
+    let (_restored_pos, restored_move, restored_turn) = manager.restore_state().unwrap();
         assert_eq!(restored_move, 1);
         assert_eq!(restored_turn, true);
         assert_eq!(manager.depth(), 0);

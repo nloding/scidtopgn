@@ -26,8 +26,11 @@ pub mod position;
 
 // Variation tree building module
 pub mod variation_builder;
+// Shared variation data structures
+pub mod variation;
 
 // Re-export key types for easier access
 pub use bridge::{GameState, GameMetadata, PositionContext, ChessNotation, ChessValidation};
 pub use error::{ScidError, Result};
 pub use pgn::{PgnExporter, ParsedGame};
+pub use variation::{VariationTree, Variation, VariationMove, VariationGameElement};

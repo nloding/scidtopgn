@@ -468,7 +468,13 @@ pub mod performance;
 pub mod optimization;
 
 // Re-export key functions
+#[allow(unused_imports)]
 pub use decoder::{decode_move, decode_move_with_stream, decode_queen_with_stream};
 pub use byte_stream::ScidByteStream;
+#[cfg(test)]
+#[deprecated(note = "Use bridge::ScidPositionTracker and/or bridge::GameState instead of position::PositionTracker")]
+#[allow(unused_imports, deprecated)]
 pub use integration::PositionTracker;
+#[cfg(test)]
+#[allow(unused_imports)]
 pub use state_manager::{PositionState, PositionStateManager};

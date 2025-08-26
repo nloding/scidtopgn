@@ -3,7 +3,7 @@
 
 use scid_parser::position::{
     performance::{MonitoredPositionTracker, PositionTrackingMetrics, PerformanceMonitor, benchmark_position_tracking},
-    optimization::{OptimizedPositionTracker, CompactPositionTracker, MovePool, MemoryAnalyzer},
+    optimization::{ScidOptimizedPositionTracker as OptimizedPositionTracker, CompactPositionTracker, MovePool, MemoryAnalyzer},
     ScidByteStream, ScidMove, Square, PieceType
 };
 

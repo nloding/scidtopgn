@@ -4,9 +4,9 @@
 use crate::position::{ScidPosition, ScidMove};
 use std::collections::VecDeque;
 
-/// Memory-optimized position tracker for large games
+/// Memory-optimized position tracker for large games (ScidPosition-based)
 #[derive(Debug)]
-pub struct OptimizedPositionTracker {
+pub struct ScidOptimizedPositionTracker {
     current_position: ScidPosition,
     // Only keep recent move history to save memory
     recent_moves: VecDeque<ScidMove>, // Limited to last N moves
@@ -15,7 +15,7 @@ pub struct OptimizedPositionTracker {
     max_recent_moves: usize,
 }
 
-impl OptimizedPositionTracker {
+impl ScidOptimizedPositionTracker {
     const DEFAULT_MAX_RECENT_MOVES: usize = 10;
     
     pub fn new() -> Self {
@@ -310,7 +310,7 @@ impl MemoryAnalyzer {
         MemoryAnalysis {
             position_size: std::mem::size_of::<ScidPosition>(),
             move_size: std::mem::size_of::<ScidMove>(),
-            tracker_base_size: std::mem::size_of::<OptimizedPositionTracker>(),
+            tracker_base_size: std::mem::size_of::<ScidOptimizedPositionTracker>(),
             compact_tracker_size: std::mem::size_of::<CompactPositionTracker>(),
         }
     }

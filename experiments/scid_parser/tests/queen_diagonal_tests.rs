@@ -7,7 +7,7 @@
 
 use scid_parser::position::{
     ScidPosition, ScidMove, Square, PieceType, 
-    decode_queen_with_stream, decode_move_with_stream
+    decode_queen_with_stream
 };
 use scid_parser::position::byte_stream::ScidByteStream;
 
@@ -16,7 +16,7 @@ use scid_parser::position::byte_stream::ScidByteStream;
 #[test]
 fn test_queen_diagonal_ne_direction() {
     // Set up position with Queen at D4
-    let mut position = ScidPosition::new_starting_position();
+    let mut _position = ScidPosition::new_starting_position();
     
     // For testing, we'll create a Queen move manually
     // In SCID encoding, Queen diagonal moves work as:
@@ -37,13 +37,13 @@ fn test_queen_diagonal_ne_direction() {
     // target G7 = square 54, so second_byte = 54 + 64 = 118
     let move_value = 3; // Equals from_file, triggers diagonal
     let move_bytes = [118]; // G7 (54) + 64 = 118
-    let mut stream = ScidByteStream::new(&move_bytes);
+        let mut _stream = ScidByteStream::new(&move_bytes);
     
-    let result = decode_queen_with_stream(move_value, &mut scid_move, &mut stream);
+    let result = decode_queen_with_stream(move_value, &mut scid_move, &mut _stream);
     
     assert!(result.is_ok(), "Queen diagonal move should decode successfully: {:?}", result);
     assert_eq!(scid_move.to, Square(54)); // G7
-    assert_eq!(stream.position(), 1); // One byte consumed from stream
+    assert_eq!(_stream.position(), 1); // One byte consumed from stream
     
     // Validate it's actually a diagonal move (D4 -> G7)
     let from_file = 3; // D file
@@ -75,13 +75,13 @@ fn test_queen_diagonal_sw_direction() {
     // target B2 = square 9, so second_byte = 9 + 64 = 73
     let move_value = 4; // Equals from_file, triggers diagonal
     let move_bytes = [73]; // B2 (9) + 64 = 73
-    let mut stream = ScidByteStream::new(&move_bytes);
+    let mut _stream = ScidByteStream::new(&move_bytes);
     
-    let result = decode_queen_with_stream(move_value, &mut scid_move, &mut stream);
+    let result = decode_queen_with_stream(move_value, &mut scid_move, &mut _stream);
     
     assert!(result.is_ok(), "Queen diagonal SW move should decode successfully: {:?}", result);
     assert_eq!(scid_move.to, Square(9)); // B2
-    assert_eq!(stream.position(), 1); // One byte consumed from stream
+    assert_eq!(_stream.position(), 1); // One byte consumed from stream
 }
 
 /// Test Queen diagonal move: A1 -> H8 (NE direction, full board)
@@ -102,13 +102,13 @@ fn test_queen_diagonal_full_board() {
     // target H8 = square 63, so second_byte = 63 + 64 = 127 (max valid)
     let move_value = 0; // Equals from_file, triggers diagonal
     let move_bytes = [127]; // H8 (63) + 64 = 127
-    let mut stream = ScidByteStream::new(&move_bytes);
+    let mut _stream = ScidByteStream::new(&move_bytes);
     
-    let result = decode_queen_with_stream(move_value, &mut scid_move, &mut stream);
+    let result = decode_queen_with_stream(move_value, &mut scid_move, &mut _stream);
     
     assert!(result.is_ok(), "Queen diagonal full board move should decode successfully: {:?}", result);
     assert_eq!(scid_move.to, Square(63)); // H8
-    assert_eq!(stream.position(), 1); // One byte consumed from stream
+    assert_eq!(_stream.position(), 1); // One byte consumed from stream
 }
 
 /// Test that Queen rook-like moves still work (no regression)
@@ -260,13 +260,13 @@ fn test_all_diagonal_directions() {
 #[test]
 fn test_full_stream_decoding_pipeline() {
     // Create a simple position for testing
-    let position = ScidPosition::new_starting_position();
+    let _position = ScidPosition::new_starting_position();
     
     // Create a 2-byte move: piece_num=1 (Queen), move_value=3 (diagonal trigger), target=G7
     // First byte: (piece_num << 4) | move_value = (1 << 4) | 3 = 19
     // Second byte: target_square + 64 = 54 + 64 = 118
     let move_bytes = [19, 118];
-    let mut stream = ScidByteStream::new(&move_bytes);
+    let _stream = ScidByteStream::new(&move_bytes);
     
     // This test requires that the position has a Queen at the expected location
     // For now, we'll just test that the parsing mechanism works

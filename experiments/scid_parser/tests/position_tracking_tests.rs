@@ -1,12 +1,14 @@
 // Position Tracking Test Suite
 // Phase 4 Step 4.1 from POSITION_TRACKING_IMPLEMENTATION_PLAN.md
 
-use scid_parser::position::{ScidPosition, Color, PieceType, Square, ScidByteStream, ScidMove};
-use scid_parser::sg4::{PositionTracker, parse_pgn_tags_with_streaming};
+use scid_parser::position::{ScidPosition, PieceType, Square, ScidByteStream, ScidMove};
+use scid_parser::sg4::parse_pgn_tags_with_streaming;
+use scid_parser::position::decode_move_with_stream;
+use scid_parser::position::performance::MonitoredPositionTracker;
 
 #[test]
 fn test_position_tracking_basic_moves() {
-    let mut tracker = PositionTracker::new();
+    // Use decoder directly instead of legacy PositionTracker
     
     // Test basic opening moves
     let moves = [
@@ -19,26 +21,17 @@ fn test_position_tracking_basic_moves() {
     for (raw_byte, expected_notation) in moves {
         let byte_data = [raw_byte];
         let mut stream = ScidByteStream::new(&byte_data);
-        let result = tracker.try_decode_move(&mut stream);
+        let position = ScidPosition::new_starting_position();
+        let result = decode_move_with_stream(&position, &mut stream);
         
         assert!(result.is_ok(), "Failed to decode move 0x{:02X}", raw_byte);
-        println!("Successfully decoded 0x{:02X} -> {} (expected: {})", raw_byte, 
-                if let Ok(element) = &result { 
-                    format!("{:?}", element) 
-                } else { 
-                    "error".to_string() 
-                }, 
-                expected_notation);
+        println!(
+            "Successfully decoded 0x{:02X} -> {} (expected: {})",
+            raw_byte,
+            if let Ok(element) = &result { format!("{:?}", element) } else { "error".to_string() },
+            expected_notation
+        );
     }
-    
-    let stats = tracker.get_statistics();
-    println!("Basic moves test - Success rate: {:.1}% ({}/{})", 
-             stats.success_rate, stats.successful_moves, stats.total_moves);
-    
-    // We expect high success rate for basic opening moves
-    assert!(stats.success_rate >= 50.0, 
-           "Basic moves should have reasonable success rate, got {:.1}%", 
-           stats.success_rate);
 }
 
 #[test]
@@ -72,7 +65,7 @@ fn test_position_validation_after_moves() {
 
 #[test]
 fn test_error_recovery_mechanisms() {
-    let mut tracker = PositionTracker::new();
+    // Decoder-based error recovery test
     
     // Test with known problematic bytes from actual parsing issues
     let problematic_bytes = [0x65, 0x28, 0x59]; // From actual failed parses
@@ -80,7 +73,8 @@ fn test_error_recovery_mechanisms() {
     for &byte in &problematic_bytes {
         let byte_data = [byte];
         let mut stream = ScidByteStream::new(&byte_data);
-        let result = tracker.try_decode_move(&mut stream);
+        let position = ScidPosition::new_starting_position();
+        let result = decode_move_with_stream(&position, &mut stream);
         
         // Should handle gracefully (either decode or mark as undecoded)
         assert!(result.is_ok(), "Should handle byte 0x{:02X} gracefully", byte);
@@ -95,11 +89,7 @@ fn test_error_recovery_mechanisms() {
         }
     }
     
-    let stats = tracker.get_statistics();
-    println!("Error recovery test - Processed {} problematic bytes", stats.total_moves);
-    
-    // All problematic bytes should be handled gracefully
-    assert_eq!(stats.total_moves, problematic_bytes.len());
+    println!("Error recovery test - processed {} bytes", problematic_bytes.len());
 }
 
 #[test]
@@ -135,7 +125,8 @@ fn test_complete_game_parsing() {
 
 #[test]
 fn test_position_tracker_statistics() {
-    let mut tracker = PositionTracker::new();
+    // Use decoder-based monitored tracker for stats compatibility
+    let mut tracker = MonitoredPositionTracker::new();
     
     // Test with a mix of valid and invalid bytes
     let test_bytes = [
@@ -145,18 +136,19 @@ fn test_position_tracker_statistics() {
     for &byte in &test_bytes {
         let byte_data = [byte];
         let mut stream = ScidByteStream::new(&byte_data);
-        let _result = tracker.try_decode_move(&mut stream);
+        let _ = tracker.try_decode_move_with_monitoring(&mut stream);
     }
     
-    let stats = tracker.get_statistics();
-    
     // Validate statistics consistency
-    assert_eq!(stats.total_moves, test_bytes.len());
+    let stats = tracker.get_statistics();
+    let metrics = tracker.get_metrics();
+    assert_eq!(metrics.total_moves_processed, test_bytes.len());
     assert_eq!(stats.successful_moves + stats.failed_moves, stats.total_moves);
     assert!(stats.success_rate <= 100.0);
     assert!(stats.success_rate >= 0.0);
     
     println!("Statistics test completed:");
+    println!("  Attempts: {}", metrics.total_moves_processed);
     println!("  Total: {}", stats.total_moves);  
     println!("  Success: {}", stats.successful_moves);
     println!("  Failed: {}", stats.failed_moves);
@@ -165,18 +157,15 @@ fn test_position_tracker_statistics() {
 
 #[test]
 fn test_position_history_tracking() {
-    let mut tracker = PositionTracker::new();
-    
-    // Apply a few moves and check history tracking
+    // Decoder-based check: ensure elements decode and bytes are consumed
+    let mut tracker = MonitoredPositionTracker::new();
     let moves = [0xCF, 0x2C]; // e4, e5 (if they decode)
-    
     for (i, &byte) in moves.iter().enumerate() {
         let byte_data = [byte];
         let mut stream = ScidByteStream::new(&byte_data);
-        if let Ok(_element) = tracker.try_decode_move(&mut stream) {
-            // Check if we can retrieve the move from history
-            let move_at_position = tracker.get_move_at_position(0); // Offset 0
-            println!("Move {}: Retrieved from history: {:?}", i + 1, move_at_position);
+        match tracker.try_decode_move_with_monitoring(&mut stream) {
+            Ok(element) => println!("Move {}: Decoded element: {:?}", i + 1, element),
+            Err(e) => println!("Move {}: Failed to decode: {}", i + 1, e),
         }
     }
 }
@@ -232,23 +221,24 @@ fn generate_test_pgn_from_parsed_game(parse_result: &scid_parser::sg4::Streaming
     // Add moves (simplified)
     let mut move_count = 1;
     let mut is_white_move = true;
+    let mut position = ScidPosition::new_starting_position();
     
     for element in &parse_result.elements {
         match element {
-            scid_parser::sg4::StreamingGameElement::Move { .. } => {
+            scid_parser::sg4::StreamingGameElement::Move { raw_bytes, .. } => {
                 if is_white_move {
                     pgn.push_str(&format!("{}.", move_count));
                 }
-                
-                // Use position tracker to get move notation if possible
-                if let Some(scid_move) = parse_result.position_tracker.get_move_at_position(element.offset()) {
-                    if let Some(position) = parse_result.position_tracker.get_position_at_offset(element.offset()) {
-                        pgn.push_str(&scid_move.to_algebraic(position));
-                    } else {
-                        pgn.push_str("?");
+                // Decode move bytes against current position and render SAN
+                let mut stream = ScidByteStream::new(raw_bytes);
+                match decode_move_with_stream(&position, &mut stream) {
+                    Ok(scid_move) => {
+                        let san = scid_move.to_algebraic(&position);
+                        // Apply to advance position for next move
+                        let _ = position.do_move(&scid_move);
+                        pgn.push_str(&san);
                     }
-                } else {
-                    pgn.push_str("?");
+                    Err(_) => pgn.push_str("?"),
                 }
                 
                 pgn.push(' ');

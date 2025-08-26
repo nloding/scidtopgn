@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use scid_parser::position::{ScidPosition, Square, Color, PieceType};
+    use scid_parser::position::{Square, PieceType};
     use scid_parser::position::decoder::{decode_king, decode_knight, decode_rook, decode_bishop, decode_queen};
     use scid_parser::position::ScidMove;
     

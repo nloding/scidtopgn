@@ -2,7 +2,7 @@
 //
 // This test suite validates the full SCID to PGN pipeline using the bridge layer and shakmaty integration.
 
-use scid_parser::bridge::{GameState, GameMetadata};
+use scid_parser::bridge::GameState;
 use std::path::Path;
 
 #[test]

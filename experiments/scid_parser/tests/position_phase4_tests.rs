@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use scid_parser::position::{ScidPosition, Square, Color, PieceType, ScidMove, decode_move};
+    use scid_parser::position::{ScidPosition, Square, Color, PieceType, decode_move};
     use scid_parser::position::integration::PositionTracker;
     
     /// Test SCID piece numbering exactly matches specification

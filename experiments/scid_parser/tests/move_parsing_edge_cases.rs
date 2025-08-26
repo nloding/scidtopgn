@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 mod tests {
-    use scid_parser::position::{ScidMove, Square, PieceType, Color, ScidPosition};
+    use scid_parser::position::{ScidMove, Square, PieceType, ScidPosition};
     use scid_parser::position::decoder::{decode_knight, decode_bishop, decode_rook, decode_pawn};
     use scid_parser::position::{decode_move, ScidByteStream, decode_move_with_stream};
     

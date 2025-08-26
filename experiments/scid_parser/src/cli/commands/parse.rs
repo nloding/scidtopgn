@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::si4::*;
 use crate::sn4::*;
 use crate::sg4::*;
-use crate::position::{PositionTracker, ScidByteStream};
+use crate::position::{ScidByteStream, ScidPosition, decode_move_with_stream};
 use crate::cli::output::tables::truncate_name;
 
 pub fn execute(base_path: &str) -> std::io::Result<()> {
@@ -286,34 +286,46 @@ fn display_games(si4_path: &str, sg4_data: &[u8], games: Vec<(usize, usize)>) {
         println!("│ PGN Tags                │ {} │", parsed_game.tags.len());
         println!("│ Game Elements           │ {} │", parsed_game.elements.len());
         
-        // Extract and display moves with position-aware algebraic notation
-        let mut position_tracker = PositionTracker::new();
-        let mut move_count = 0;
+    // Extract and display moves with position-aware algebraic notation (decoder-based)
+    let mut decode_position = ScidPosition::new_starting_position();
+    let mut move_count = 0;
+    let mut _position_errors = 0;
         
         for element in &parsed_game.elements {
-            if let StreamingGameElement::Move { raw_bytes, offset, .. } = element {
+            if let StreamingGameElement::Move { raw_bytes, offset: _, .. } = element {
                 move_count += 1;
                 
                 // Create stream from raw bytes for this move
                 let mut move_stream = ScidByteStream::new(raw_bytes);
-                let move_description = match position_tracker.process_move_from_stream(&mut move_stream, *offset) {
-                    Ok(decoded_move) => {
-                        // Use algebraic notation from position-aware decoding
-                        decoded_move.interpretation.description().to_string()
+                let start_pos = move_stream.position();
+                match decode_move_with_stream(&decode_position, &mut move_stream) {
+                    Ok(scid_move) => {
+                        // Render algebraic notation and apply to local position
+                        let desc = scid_move.to_algebraic(&decode_position);
+                        if let Err(e) = decode_position.do_move(&scid_move) {
+                            _position_errors += 1;
+                            println!("│ Move {} ERROR           │ ❌ {} │", move_count, truncate_name(&e, 70));
+                            continue;
+                        }
+                        let consumed = move_stream.position().saturating_sub(start_pos);
+                        let byte_info = if consumed > 1 { format!(" ({} bytes)", consumed) } else { String::new() };
+                        println!("│ Move {}{}               │ ✅ {} │", move_count, byte_info, truncate_name(&desc, 65));
                     },
-                    Err(_) => {
+                    Err(e) => {
+                        _position_errors += 1;
                         // Fallback for undecoded moves
-                        if raw_bytes.len() > 0 {
-                            format!("Raw byte 0x{:02X} (undecoded)", raw_bytes[0])
+                        if !raw_bytes.is_empty() {
+                            println!(
+                                "│ Move {} ERROR           │ ❌ {} (raw 0x{:02X}) │",
+                                move_count,
+                                truncate_name(&e, 58),
+                                raw_bytes[0]
+                            );
                         } else {
-                            "Empty move (undecoded)".to_string()
+                            println!("│ Move {} ERROR           │ ❌ {} │", move_count, truncate_name(&e, 70));
                         }
                     }
-                };
-                
-                println!("│ Move {}                  │ {} │", 
-                    move_count, 
-                    move_description);
+                }
             }
         }
         

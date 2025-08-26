@@ -3,7 +3,8 @@
 
 #[cfg(test)]
 mod tests {
-    use scid_parser::position::{ScidByteStream, PositionTracker};
+    use scid_parser::position::ScidByteStream;
+    use scid_parser::position::integration::PositionTracker;
     use scid_parser::sg4::MoveInterpretation;
     
     #[test]

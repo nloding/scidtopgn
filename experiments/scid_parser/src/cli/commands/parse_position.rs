@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::BufReader;
 use crate::si4::*;
 use crate::sg4::*;
-use crate::position::{PositionTracker, ScidByteStream};
+use crate::position::{ScidByteStream, ScidPosition, decode_move_with_stream};
 use crate::cli::output::tables::truncate_name;
 
 pub fn execute(base_path: &str) -> std::io::Result<()> {
@@ -93,7 +93,7 @@ fn display_games_with_position(si4_path: &str, sg4_data: &[u8], games: Vec<(usiz
         return;
     }
     
-    // Display each game with position tracking
+    // Display each game with position-aware decoding (no legacy tracker)
     for (game_num, (start_offset, end_offset)) in games.iter().enumerate() {
         println!("🎮 GAME {} DETAILS (Position-Aware Decoding)", game_num + 1);
         
@@ -143,51 +143,45 @@ fn display_games_with_position(si4_path: &str, sg4_data: &[u8], games: Vec<(usiz
         println!("│ 🎯 POSITION TRACKING    │ Status                                                                           │");
         println!("├─────────────────────────┼──────────────────────────────────────────────────────────────────────────────────┤");
         
-        // Parse moves with position tracking
-        let mut position_tracker = PositionTracker::new();
+        // Parse moves with a local SCID-compliant position used only for decoding
+        let mut decode_position = ScidPosition::new_starting_position();
         let mut move_count = 0;
         let mut position_errors = 0;
-        
         println!("│ Starting Position       │ ✅ Standard chess starting position                                             │");
         
-        // Process each move element with streaming-aware position tracking
         for element in &parsed_game.elements {
-            if let StreamingGameElement::Move { raw_bytes, offset, bytes_consumed, .. } = element {
+            if let StreamingGameElement::Move { raw_bytes, offset: _, bytes_consumed: parsed_bytes, .. } = element {
                 move_count += 1;
                 
-                // Create stream from raw bytes for this move
+                // Create a byte stream for this move and decode with current position
                 let mut move_stream = ScidByteStream::new(raw_bytes);
-                match position_tracker.process_move_from_stream(&mut move_stream, *offset) {
-                    Ok(decoded_move) => {
-                        let move_desc = decoded_move.interpretation.description();
-                        let byte_info = if *bytes_consumed > 1 {
-                            format!(" ({} bytes)", bytes_consumed)
-                        } else {
-                            String::new()
-                        };
+                let start_pos = move_stream.position();
+                match decode_move_with_stream(&decode_position, &mut move_stream) {
+                    Ok(scid_move) => {
+                        // Derive a simple algebraic-like description and apply to local position
+                        let desc = scid_move.to_algebraic(&decode_position);
+                        let applied = decode_position.do_move(&scid_move);
+                        if let Err(e) = applied {
+                            position_errors += 1;
+                            println!("│ Move {} ERROR           │ ❌ {} │", move_count, truncate_name(&e, 70));
+                            continue;
+                        }
+                        let consumed = move_stream.position().saturating_sub(start_pos);
+                        let byte_info = if consumed > 1 { format!(" ({} bytes)", consumed) } else { String::new() };
+                        println!("│ Move {}{}               │ ✅ {} │", move_count, byte_info, truncate_name(&desc, 65));
                         
-                        println!("│ Move {}{}               │ ✅ {} │", 
-                            move_count,
-                            byte_info,
-                            truncate_name(move_desc, 65)
-                        );
-                        
-                        // Special highlighting for multi-byte moves (Queen diagonal)
-                        if *bytes_consumed == 2 {
+                        // Multi-byte highlight
+                        if consumed == 2 || *parsed_bytes == 2 {
                             println!("│ 🔥 2-BYTE MOVE DETECTED │ ✅ Queen diagonal move successfully decoded                                     │");
                         }
-                        
-                        // Special highlighting for the CF byte (our test case)
-                        if raw_bytes.len() > 0 && raw_bytes[0] == 0xCF {
+                        // CF byte highlight
+                        if !raw_bytes.is_empty() && raw_bytes[0] == 0xCF {
                             println!("│ 🎯 CF BYTE DETECTED     │ ✅ Correctly decoded (not 'en passant')                                        │");
                         }
-                    },
+                    }
                     Err(e) => {
                         position_errors += 1;
-                        println!("│ Move {} ERROR           │ ❌ {} │", 
-                            move_count,
-                            truncate_name(&e, 70)
-                        );
+                        println!("│ Move {} ERROR           │ ❌ {} │", move_count, truncate_name(&e, 70));
                     }
                 }
             }

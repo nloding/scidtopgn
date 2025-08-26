@@ -181,25 +181,15 @@ impl ScidPositionTracker {
             }
         }
         
-        // Check for en passant using SCID move data
+        // Handle pawn moves using SCID specification
         if role == Role::Pawn {
-            // Check for en passant
-            if let crate::sg4::MoveInterpretation::Pawn { is_en_passant: Some(true), .. } = &scid_move.interpretation {
+            // Check for en passant using position state
+            if self.is_pawn_en_passant(from, to) {
                 return Ok(Move::EnPassant { from, to });
             }
-        }
-        
-        // Determine if this is a capture
-        let capture = self.current_position.board().piece_at(to).map(|p| p.role);
-        
-        // Handle pawn promotion
-        if role == Role::Pawn {
-            // Check if this is a promotion move (reaching 8th/1st rank)
-            let is_promotion = (self.to_move == Color::White && to.rank() == shakmaty::Rank::Eighth) ||
-                              (self.to_move == Color::Black && to.rank() == shakmaty::Rank::First);
             
-            if is_promotion {
-                let promotion_role = extract_promotion_from_scid_move(scid_move)?;
+            // Check for promotion using move_value from SCID specification
+            if let Some(promotion_role) = self.get_pawn_promotion_from_move_value(scid_move.move_value) {
                 return Ok(Move::Normal {
                     role: Role::Pawn,
                     from,
@@ -209,6 +199,9 @@ impl ScidPositionTracker {
                 });
             }
         }
+        
+        // Determine if this is a capture for regular moves
+        let capture = self.current_position.board().piece_at(to).map(|p| p.role);
         
         let promotion = None;
         
@@ -540,8 +533,9 @@ impl ScidPositionTracker {
     /// Decode knight target square (from decodeKnight in game.cpp)
     fn decode_knight_target(&self, from: Square, move_value: u8) -> Result<Square> {
         // Knight L-shaped moves: 8 possible destinations
-        let square_diffs = match move_value {
-            1 => -17, // Up 2, Left 1
+        // SCID encodes these relative to side to move; Black inverts the sign.
+        let base_diff = match move_value {
+            1 => -17, // Up 2, Left 1 (from White's perspective)
             2 => -15, // Up 2, Right 1
             3 => -10, // Up 1, Left 2
             4 => -6,  // Up 1, Right 2
@@ -552,6 +546,11 @@ impl ScidPositionTracker {
             _ => return Err(ScidError::conversion_error(format!("Invalid knight move value: {}", move_value))),
         };
         
+        let square_diffs = match self.to_move {
+            Color::White => base_diff,
+            Color::Black => -base_diff,
+        };
+        
         let target_square = from as i8 + square_diffs;
         if target_square >= 0 && target_square < 64 {
             Ok(Square::new(target_square as u32))
@@ -560,28 +559,122 @@ impl ScidPositionTracker {
         }
     }
     
-    /// Decode pawn target square (from decodePawn in game.cpp)
+    /// Decode pawn target square using SCID's exact specification (from decodePawn in game.cpp)
     fn decode_pawn_target(&self, from: Square, move_value: u8) -> Result<Square> {
-        // SCID pawn encoding is complex - simplified version for now
-        // Direction based on color
-        let direction = if self.to_move == Color::White { 8 } else { -8 };
+        // SCID's exact specification from decodePawn() in game.cpp
+        const TO_SQUARE_DIFF: [i8; 16] = [
+            7, 8, 9,    // 0-2: capture-left, forward, capture-right (no promotion)
+            7, 8, 9,    // 3-5: capture-left, forward, capture-right + Queen promotion
+            7, 8, 9,    // 6-8: capture-left, forward, capture-right + Rook promotion  
+            7, 8, 9,    // 9-11: capture-left, forward, capture-right + Bishop promotion
+            7, 8, 9,    // 12-14: capture-left, forward, capture-right + Knight promotion
+            16          // 15: double pawn push (2 squares forward)
+        ];
         
-        // Basic implementation: move_value 0-2 = forward/diagonal moves
-        let target_square = match move_value {
-            0 => from as i8 + direction - 1, // Capture left
-            1 => from as i8 + direction,     // Move forward  
-            2 => from as i8 + direction + 1, // Capture right
-            _ => {
-                // Complex pawn moves (double push, promotions) need more detailed decoding
-                return Err(ScidError::conversion_error(format!("Complex pawn move value {} needs detailed implementation", move_value)));
-            }
+        if move_value >= 16 {
+            return Err(ScidError::conversion_error(format!("Invalid pawn move value: {}", move_value)));
+        }
+        
+        let square_diff = TO_SQUARE_DIFF[move_value as usize];
+        
+        // Calculate target square using SCID's exact logic:
+        // if (toMove == WHITE) {
+        //     sm->to = sm->from + toSquareDiff[val];
+        // } else {
+        //     sm->to = sm->from - toSquareDiff[val];
+        // }
+        let to_square_index = match self.to_move {
+            Color::White => from as u8 as i8 + square_diff,
+            Color::Black => from as u8 as i8 - square_diff,
         };
         
-        if target_square >= 0 && target_square < 64 {
-            Ok(Square::new(target_square as u32))
-        } else {
-            Err(ScidError::conversion_error(format!("Pawn move out of bounds: {} -> {}", from as u8, target_square)))
+        if to_square_index < 0 || to_square_index >= 64 {
+            return Err(ScidError::conversion_error(format!("Invalid pawn target square: {}", to_square_index)));
         }
+        
+        Ok(Square::new(to_square_index as u32))
+    }
+    
+    /// Extract promotion piece from pawn move_value using SCID's exact specification
+    fn get_pawn_promotion_from_move_value(&self, move_value: u8) -> Option<Role> {
+        // SCID's exact specification from decodePawn() in game.cpp
+        const PROMOTION_PIECES: [Option<Role>; 16] = [
+            None, None, None,                           // 0-2: no promotion
+            Some(Role::Queen), Some(Role::Queen), Some(Role::Queen),     // 3-5: Queen
+            Some(Role::Rook), Some(Role::Rook), Some(Role::Rook),        // 6-8: Rook
+            Some(Role::Bishop), Some(Role::Bishop), Some(Role::Bishop),  // 9-11: Bishop
+            Some(Role::Knight), Some(Role::Knight), Some(Role::Knight),  // 12-14: Knight
+            None                                                         // 15: no promotion
+        ];
+        
+        if move_value >= 16 {
+            None
+        } else {
+            PROMOTION_PIECES[move_value as usize]
+        }
+    }
+    
+    /// Enhanced conversion with detailed error diagnostics (for debugging)
+    fn convert_scid_to_shakmaty_with_diagnostics(&self, scid_move: &DecodedMove, move_number: usize, raw_byte: u8) -> Result<Move> {
+        let result = self.convert_scid_to_shakmaty(scid_move);
+        
+        if let Err(ref error) = result {
+            eprintln!("🔍 MOVE CONVERSION FAILURE:");
+            eprintln!("   Move #{}: Raw byte 0x{:02X} ({:#010b})", move_number, raw_byte, raw_byte);
+            eprintln!("   Piece: {} | Value: {}", raw_byte >> 4, raw_byte & 15);
+            eprintln!("   Piece num: {} | Move value: {}", scid_move.piece_num, scid_move.move_value);
+            eprintln!("   Interpretation: {:?}", scid_move.interpretation);
+            eprintln!("   Error: {}", error);
+            eprintln!("   Position FEN: {}", self.current_position.board().board_fen(shakmaty::Bitboard::EMPTY));
+            eprintln!("   To move: {:?}", self.to_move);
+            eprintln!("   Current ply: {}", self.current_ply);
+            eprintln!();
+        }
+        
+        result
+    }
+    
+    /// Analyze moves for debugging patterns
+    pub fn analyze_move_pattern(&self, move_number: usize, raw_byte: u8) {
+        let piece_num = raw_byte >> 4;
+        let move_value = raw_byte & 15;
+        
+        eprintln!("   Move {}: 0x{:02X} ({:#010b})", move_number, raw_byte, raw_byte);
+        eprintln!("      Piece: {} | Value: {}", piece_num, move_value);
+        
+        // Add piece type analysis
+        if (piece_num as usize) < self.piece_lists[self.to_move as usize].len() {
+            let piece_square = self.piece_lists[self.to_move as usize][piece_num as usize];
+            if let Some(piece) = self.current_position.board().piece_at(piece_square) {
+                eprintln!("      Type: {:?} at {}", piece.role, piece_square);
+                
+                // Special analysis for pawns
+                if piece.role == Role::Pawn && move_value >= 3 {
+                    eprintln!("      ⚠️  COMPLEX PAWN MOVE - value {} indicates promotion", move_value);
+                    match move_value {
+                        3..=5 => eprintln!("         -> Queen promotion"),
+                        6..=8 => eprintln!("         -> Rook promotion"),
+                        9..=11 => eprintln!("         -> Bishop promotion"),
+                        12..=14 => eprintln!("         -> Knight promotion"),
+                        15 => eprintln!("         -> Double pawn push"),
+                        _ => eprintln!("         -> Unknown pawn move type"),
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Check if pawn move is en passant based on position state
+    fn is_pawn_en_passant(&self, from: Square, to: Square) -> bool {
+        // Check if this is an en passant capture:
+        // 1. Moving diagonally to an empty square
+        // 2. Target square matches position's en passant square
+        
+        let is_diagonal = (from.file() as i8 - to.file() as i8).abs() == 1;
+        let target_empty = self.current_position.board().piece_at(to).is_none();
+        let ep_square_matches = self.current_position.ep_square(shakmaty::EnPassantMode::Legal) == Some(to);
+        
+        is_diagonal && target_empty && ep_square_matches
     }
 }
 

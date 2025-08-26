@@ -1,7 +1,6 @@
 /// Test that all converted moves are legal
 #[test]
 fn test_scid_move_conversion_legality() {
-    use scid_parser::sg4::DecodedMove;
     let mut game_state = GameState::new();
     // Example: Add sample DecodedMoves (these should be replaced with real test data)
     let scid_moves = vec![
@@ -28,9 +27,9 @@ fn test_scid_move_conversion_legality() {
 // chess functionality. It provides comprehensive testing for the bridge layer,
 // GameState functionality, and end-to-end SCID to PGN conversion.
 
-use scid_parser::bridge::{GameState, GameMetadata, PositionContext, ChessNotation, BasicChessValidation};
-use scid_parser::error::{Result, ScidError};
-use shakmaty::{Chess, Position};
+use scid_parser::bridge::{GameState, GameMetadata, PositionContext, BasicChessValidation};
+use scid_parser::ScidError;
+use shakmaty::Position;
 
 /// Test basic GameState creation and initialization
 #[test]
@@ -243,7 +242,7 @@ fn test_placeholder_methods() {
 /// Test SCID move conversion placeholder
 #[test]
 fn test_scid_move_conversion_placeholder() {
-    let mut game_state = GameState::new();
+    let game_state = GameState::new();
     
     // This is a placeholder test - the actual implementation will be in later steps
     // For now, we expect an error since conversion isn't implemented

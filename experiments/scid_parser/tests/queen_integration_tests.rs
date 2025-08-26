@@ -8,7 +8,7 @@
 //! PHASE 4.3: Integration Tests with Real SCID Data from QUEEN_DIAGONAL_MOVES_REMEDIATION_PLAN.md
 
 use scid_parser::sg4::{find_game_boundaries, parse_pgn_tags_with_streaming, StreamingGameElement};
-use scid_parser::position::{PositionTracker, ScidPosition, decode_move_with_stream};
+use scid_parser::position::{ScidPosition, decode_move_with_stream, PieceType};
 use scid_parser::position::byte_stream::ScidByteStream;
 
 /// Test the five.sg4 database with streaming Queen diagonal move support
@@ -49,7 +49,7 @@ fn test_five_database_with_queen_moves() {
         // Parse game using streaming parser
         match parse_pgn_tags_with_streaming(game_data) {
             Ok(parsed_game) => {
-                let mut position_tracker = PositionTracker::new();
+                let mut position = ScidPosition::new_starting_position();
                 
                 for element in &parsed_game.elements {
                     if let StreamingGameElement::Move { raw_bytes, offset, bytes_consumed, .. } = element {
@@ -58,30 +58,31 @@ fn test_five_database_with_queen_moves() {
                         
                         // Create stream from raw move bytes
                         let mut move_stream = ScidByteStream::new(raw_bytes);
-                        
-                        match position_tracker.process_move_from_stream(&mut move_stream, *offset) {
-                            Ok(decoded_move) => {
+                        // Decode against current position and apply if valid
+                        match decode_move_with_stream(&position, &mut move_stream) {
+                            Ok(scid_move) => {
                                 successful_moves += 1;
                                 game_successful += 1;
-                                
-                                // Check for multi-byte moves (potential Queen diagonal moves)
+                                // Apply move to advance position
+                                let _ = position.do_move(&scid_move);
+                                // Count two-byte and queen-diagonal style moves
                                 if *bytes_consumed == 2 {
                                     two_byte_moves += 1;
-                                    
-                                    // Check if this is a Queen move
-                                    let description = decoded_move.interpretation.description();
-                                    if description.contains("Queen") || description.contains("Q") {
+                                    if scid_move.moving_piece == PieceType::Queen {
                                         queen_diagonal_moves += 1;
                                         game_queen_diagonals += 1;
-                                        println!("   ✅ Queen diagonal move #{}: {}", 
-                                               queen_diagonal_moves, description);
+                                        println!(
+                                            "   ✅ Queen diagonal move #{}: {}-{}",
+                                            queen_diagonal_moves,
+                                            scid_move.from.to_algebraic(),
+                                            scid_move.to.to_algebraic()
+                                        );
                                     }
                                 }
                             }
                             Err(e) => {
-                                // Still log failed moves for debugging
-                                if game_moves <= 10 { // Only show first 10 failures per game
-                                    println!("   ❌ Move {} failed: {}", game_moves, e);
+                                if game_moves <= 10 {
+                                    println!("   ❌ Move {} failed: {} (offset {})", game_moves, e, offset);
                                 }
                             }
                         }
@@ -236,7 +237,6 @@ fn test_parsing_performance_comparison() {
     ];
     
     let mut stream = ScidByteStream::new(&test_data);
-    let bytes_processed = 0;
     let start_time = std::time::Instant::now();
     
     // Simulate parsing the stream

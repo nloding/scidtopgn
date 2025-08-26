@@ -230,8 +230,7 @@ fn wrap_movetext(movetext: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bridge::{ChessValidator, GameState};
-    use shakmaty::{Square, Role};
+    use crate::bridge::GameState;
     
     #[test]
     fn test_pgn_exporter_creation() {
@@ -314,7 +313,11 @@ mod tests {
 // From SCID_TO_PGN_COMPLETION_PLAN.md Phase 4.2
 // ==========================================
 
-use crate::pgn::{VariationFormatter, AnnotationFormatter, PgnStandardsChecker};
+use crate::pgn::PgnStandardsChecker;
+// Use the position-aware decoder path for generating SAN without legacy trackers
+use crate::position::ScidPosition;
+use crate::position::byte_stream::ScidByteStream;
+use crate::position::decoder::decode_move_with_stream;
 
 /// Enhanced PGN exporter with complete feature support
 pub struct EnhancedPgnExporter {
@@ -603,8 +606,8 @@ impl EnhancedPgnExporter {
         }
         pgn.push('\n');
         
-        // Generate moves using position tracker
-        let moves_section = self.generate_moves_with_positions(&parsed_game.elements, &parsed_game.position_tracker)?;
+    // Generate moves using position-aware decoder (no legacy tracker)
+    let moves_section = self.generate_moves_with_positions(&parsed_game.elements)?;
         
         // Apply standards formatting
         let formatted_moves = self.standards_checker.format_pgn(&moves_section);
@@ -619,44 +622,56 @@ impl EnhancedPgnExporter {
     
     fn generate_moves_with_positions(
         &self,
-        elements: &[crate::sg4::StreamingGameElement],
-        position_tracker: &crate::sg4::PositionTracker
+        elements: &[crate::sg4::StreamingGameElement]
     ) -> crate::error::Result<String> {
+        // Maintain a stack of positions and numbering for nested variations
+        let mut position_stack: Vec<ScidPosition> = vec![ScidPosition::new_starting_position()];
+        let mut move_number_stack: Vec<usize> = vec![1];
+        let mut is_white_stack: Vec<bool> = vec![true];
+
         let mut moves = String::new();
-        let mut move_number = 1;
-        let mut is_white_move = true;
-        
+
         for element in elements {
             match element {
-                crate::sg4::StreamingGameElement::Move { offset, .. } => {
-                    if is_white_move {
-                        moves.push_str(&format!("{}.", move_number));
+                crate::sg4::StreamingGameElement::Move { raw_bytes, .. } => {
+                    // Current context
+                    let position = position_stack.last_mut().expect("position stack not empty");
+                    let move_number = move_number_stack.last_mut().expect("move number stack not empty");
+                    let is_white_move = is_white_stack.last_mut().expect("color stack not empty");
+
+                    if *is_white_move {
+                        moves.push_str(&format!("{}.", *move_number));
                     }
-                    
-                    // Get move notation from position tracker
-                    let move_notation = if let Some(scid_move) = position_tracker.get_move_at_position(*offset) {
-                        if let Some(position) = position_tracker.get_position_at_offset(*offset) {
-                            scid_move.to_algebraic(position)
-                        } else {
-                            scid_move.to_algebraic(position_tracker.current_position())
-                        }
-                    } else {
-                        // Fallback for undecoded moves
-                        match element {
-                            crate::sg4::StreamingGameElement::Move { raw_bytes, .. } if !raw_bytes.is_empty() => {
+
+                    // Attempt to decode this move from its raw bytes in the context position
+                    let move_notation = if !raw_bytes.is_empty() {
+                        let mut stream = ScidByteStream::new(raw_bytes);
+                        match decode_move_with_stream(position, &mut stream) {
+                            Ok(scid_move) => {
+                                let san = scid_move.to_algebraic(position);
+                                // Apply to current position for subsequent moves in this context
+                                // If application fails, keep SAN but don't advance state
+                                if let Err(_e) = position.do_move(&scid_move) {
+                                    // Leave position unchanged
+                                }
+                                san
+                            }
+                            Err(_e) => {
+                                // Fallback for undecoded moves
                                 format!("{{undecoded:0x{:02X}}}", raw_bytes[0])
                             }
-                            _ => "{undecoded}".to_string()
                         }
+                    } else {
+                        "{undecoded}".to_string()
                     };
-                    
+
                     moves.push_str(&move_notation);
                     moves.push(' ');
-                    
-                    if !is_white_move {
-                        move_number += 1;
+
+                    if !*is_white_move {
+                        *move_number += 1;
                     }
-                    is_white_move = !is_white_move;
+                    *is_white_move = !*is_white_move;
                 }
                 crate::sg4::StreamingGameElement::Comment { text, .. } => {
                     if self.options.include_comments {
@@ -672,11 +687,20 @@ impl EnhancedPgnExporter {
                     if self.options.include_variations {
                         moves.push_str("( ");
                     }
+                    // Push current context for nested variation
+                    let current_position = position_stack.last().cloned().expect("position stack not empty");
+                    position_stack.push(current_position);
+                    move_number_stack.push(*move_number_stack.last().unwrap());
+                    is_white_stack.push(*is_white_stack.last().unwrap());
                 }
                 crate::sg4::StreamingGameElement::VariationEnd { .. } => {
                     if self.options.include_variations {
                         moves.push_str(") ");
                     }
+                    // Restore context
+                    if position_stack.len() > 1 { position_stack.pop(); }
+                    if move_number_stack.len() > 1 { move_number_stack.pop(); }
+                    if is_white_stack.len() > 1 { is_white_stack.pop(); }
                 }
                 crate::sg4::StreamingGameElement::GameEnd { .. } => {
                     break; // End of game
@@ -686,7 +710,7 @@ impl EnhancedPgnExporter {
                 }
             }
         }
-        
+
         Ok(moves.trim_end().to_string())
     }
 }

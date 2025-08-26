@@ -93,8 +93,13 @@ pub fn decode_move_with_position(
     }
 }
 
-/// Enhanced game element processing with position tracking
-/// This maintains a ScidPosition throughout game parsing for accurate move decoding
+/// Legacy adapter that maintained a ScidPosition during parsing.
+///
+/// Deprecated: Prefer the shakmaty-based bridge implementation
+/// (`crate::bridge::ScidPositionTracker`) and `crate::bridge::GameState` for
+/// position tracking and move application. This type remains only for
+/// transitional compatibility and will be removed.
+#[deprecated(note = "Use bridge::ScidPositionTracker and/or bridge::GameState instead")]
 pub struct PositionTracker {
     position: ScidPosition,
     move_count: u32,

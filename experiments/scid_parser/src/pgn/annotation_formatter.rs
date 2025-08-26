@@ -1,4 +1,5 @@
-use crate::sg4::{VariationMove, nag_processor::NagProcessor};
+use crate::variation::VariationMove;
+use crate::sg4::nag_processor::NagProcessor;
 
 /// Formats annotations for PGN output
 pub struct AnnotationFormatter;

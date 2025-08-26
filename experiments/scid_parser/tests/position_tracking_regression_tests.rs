@@ -317,7 +317,7 @@ fn parse_scid_game_with_position_tracking(game_idx: usize) -> Result<scid_parser
         .map_err(|e| format!("Could not read SG4 file: {}", e))?;
     
     let mut si4_cursor = Cursor::new(&si4_data);
-    let header = parse_header(&mut si4_cursor)
+    let _header = parse_header(&mut si4_cursor)
         .map_err(|e| format!("Could not parse SI4 header: {}", e))?;
     
     // Skip to the requested game

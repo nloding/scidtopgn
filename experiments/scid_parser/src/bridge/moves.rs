@@ -8,27 +8,6 @@ fn parse_promotion_piece_scid(promo: &str) -> Result<Role> {
         _ => Err(ScidError::conversion_error(format!("Unknown promotion piece: {}", promo))),
     }
 }
-// COMMENTED OUT: Unused function superseded by position-aware piece lookup
-/*
-/// Helper function to map SCID piece number to shakmaty Role
-/// SCID piece_num values:
-///   0-1: King
-///   2-3: Queen
-///   4-7: Rook
-///   8-11: Bishop
-///   12-15: Knight
-///   16+: Pawn (if used)
-fn scid_piece_num_to_role(piece_num: u8) -> Option<Role> {
-    match piece_num {
-        0 | 1 => Some(Role::King),
-        2 | 3 => Some(Role::Queen),
-        4..=7 => Some(Role::Rook),
-        8..=11 => Some(Role::Bishop),
-        12..=15 => Some(Role::Knight),
-        _ => Some(Role::Pawn),
-    }
-}
-*/
 /// Helper function to calculate target square from a starting square and a difference
 /// Used for king, knight, and pawn moves (and others as needed)
 fn calculate_target_square_scid(from: Square, diff: i32) -> Result<Square> {
@@ -417,7 +396,7 @@ fn get_capture_at_square(square: Square, position: &Chess) -> Option<Role> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shakmaty::{Chess, Position};
+    use shakmaty::Chess;
     use crate::sg4::{DecodedMove, MoveInterpretation};
     
     /// Test basic king move conversion

@@ -1,4 +1,4 @@
-use crate::sg4::{VariationTreeV2, Variation, VariationMove};
+use crate::variation::{VariationTree, Variation, VariationMove};
 
 /// Formats variation trees into proper PGN notation
 pub struct VariationFormatter {
@@ -22,7 +22,7 @@ impl VariationFormatter {
     }
     
     /// Format complete variation tree to PGN string
-    pub fn format_tree(&mut self, tree: &VariationTreeV2) -> String {
+    pub fn format_tree(&mut self, tree: &VariationTree) -> String {
         self.output.clear();
         self.current_move_number = 1;
         self.need_move_number = true;
@@ -185,7 +185,7 @@ mod tests {
             algebraic: "e5".to_string(),
         };
         
-        let tree = VariationTreeV2 {
+    let tree = VariationTree {
             main_line: vec![move1, move2],
             variations: Vec::new(),
         };
@@ -238,7 +238,7 @@ mod tests {
             depth: 1,
         };
         
-        let tree = VariationTreeV2 {
+    let tree = VariationTree {
             main_line: vec![main_move],
             variations: vec![variation],
         };
@@ -336,7 +336,7 @@ mod tests {
             depth: 1,
         };
         
-        let tree = VariationTreeV2 {
+    let tree = VariationTree {
             main_line: vec![main_move],
             variations: vec![main_variation],
         };

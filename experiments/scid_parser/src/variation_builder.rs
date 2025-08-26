@@ -1,5 +1,6 @@
-use crate::sg4::{VariationTreeV2, Variation, VariationMove, VariationGameElement};
-use crate::position::{ScidMove, Square, PieceType, ScidPosition, PositionStateManager};
+use crate::variation::{VariationTree, Variation, VariationMove, VariationGameElement};
+use crate::position::{ScidMove, Square, PieceType, ScidPosition};
+use crate::position::state_manager::PositionStateManager;
 
 /// Builder for constructing variation trees from parsed game elements
 /// with position state management for accurate algebraic notation
@@ -37,10 +38,10 @@ impl VariationTreeBuilder {
         }
     }
 
-    pub fn build_tree(&mut self, elements: &[VariationGameElement]) -> Result<VariationTreeV2, String> {
+    pub fn build_tree(&mut self, elements: &[VariationGameElement]) -> Result<VariationTree, String> {
         for element in elements {
             match element {
-                VariationGameElement::Move { piece_num, move_value, raw_bytes, .. } => {
+                VariationGameElement::Move { piece_num, .. } => {
                     // Use position-aware move decoding to get proper ScidMove
                     // For now, create a placeholder until we integrate with the decoder
                     let scid_move = ScidMove {
@@ -167,7 +168,7 @@ impl VariationTreeBuilder {
             }
         }
 
-        Ok(VariationTreeV2 {
+    Ok(VariationTree {
             main_line: self.main_line.clone(),
             variations: self.variations.clone(),
         })

@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use scid_parser::position::{ScidPosition, ScidMove, PieceType, Square, Color, ScidByteStream, decode_queen_with_stream};
+    use scid_parser::position::{ScidMove, PieceType, Square, ScidByteStream, decode_queen_with_stream};
     
     /// Helper function to create a test Queen move structure
     fn create_test_queen_move(from_square: u8) -> ScidMove {

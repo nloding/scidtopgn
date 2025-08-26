@@ -1,6 +1,5 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::position::{ScidPosition, Square, Color, PieceType};
     use crate::position::decoder::decode_move;
     
