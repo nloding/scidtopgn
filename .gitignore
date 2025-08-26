@@ -26,4 +26,5 @@ target
 .crush/
 
 scidvspc/
-.ignore/
+.docs/
+.claude/
