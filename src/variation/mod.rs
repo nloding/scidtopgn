@@ -14,6 +14,16 @@ pub struct VariationTree {
     pub variations: Vec<Variation>,
 }
 
+impl VariationTree {
+    /// Create an empty variation tree (back-compat constructor)
+    pub fn new() -> Self {
+        Self {
+            main_line: Vec::new(),
+            variations: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Variation {
     /// Move number where this variation starts (0-based)

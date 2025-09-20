@@ -2,7 +2,7 @@
 //
 // This test suite validates the full SCID to PGN pipeline using the bridge layer and shakmaty integration.
 
-use scid_parser::bridge::GameState;
+use scidtopgn::bridge::GameState;
 use std::path::Path;
 
 #[test]
@@ -18,6 +18,12 @@ fn test_pgn_output_format() {
     // Test that PGN output matches expected format for an empty game
     let game_state = GameState::new();
     let pgn = game_state.to_pgn();
-    assert!(pgn.contains("*"), "PGN output should contain result marker for empty game");
-    assert!(!pgn.contains("1. "), "Empty game should not contain move numbers");
+    assert!(
+        pgn.contains("*"),
+        "PGN output should contain result marker for empty game"
+    );
+    assert!(
+        !pgn.contains("1. "),
+        "Empty game should not contain move numbers"
+    );
 }

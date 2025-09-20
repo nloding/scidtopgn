@@ -1,0 +1,16 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "cargo test (no run)",
+			"type": "shell",
+			"command": "cargo test",
+			"args": [
+				"-q",
+				"--no-run"
+			],
+			"isBackground": false,
+			"group": "build"
+		}
+	]
+}

@@ -1,6 +1,6 @@
-use crate::variation::{VariationTree, Variation, VariationMove, VariationGameElement};
-use crate::position::{ScidMove, Square, PieceType, ScidPosition};
 use crate::position::state_manager::PositionStateManager;
+use crate::position::{PieceType, ScidMove, ScidPosition, Square};
+use crate::variation::{Variation, VariationGameElement, VariationMove, VariationTree};
 
 /// Builder for constructing variation trees from parsed game elements
 /// with position state management for accurate algebraic notation
@@ -11,7 +11,7 @@ pub struct VariationTreeBuilder {
     current_variation_stack: Vec<VariationInProgress>,
     move_counter: usize,
     is_white_turn: bool,
-    
+
     // Position tracking for accurate move decoding
     current_position: ScidPosition,
     position_state_manager: PositionStateManager,
@@ -38,18 +38,21 @@ impl VariationTreeBuilder {
         }
     }
 
-    pub fn build_tree(&mut self, elements: &[VariationGameElement]) -> Result<VariationTree, String> {
+    pub fn build_tree(
+        &mut self,
+        elements: &[VariationGameElement],
+    ) -> Result<VariationTree, String> {
         for element in elements {
             match element {
                 VariationGameElement::Move { piece_num, .. } => {
                     // Use position-aware move decoding to get proper ScidMove
                     // For now, create a placeholder until we integrate with the decoder
                     let scid_move = ScidMove {
-                        from: Square(0), // Will be filled by position decoder
-                        to: Square(8),   // Will be filled by position decoder
-                        moving_piece: PieceType::Pawn, // Will be filled by position decoder
+                        from: Square(0),                  // Will be filled by position decoder
+                        to: Square(8),                    // Will be filled by position decoder
+                        moving_piece: PieceType::Pawn,    // Will be filled by position decoder
                         captured_piece: PieceType::Empty, // Will be filled by position decoder
-                        promote: PieceType::Empty, // Will be filled by position decoder
+                        promote: PieceType::Empty,        // Will be filled by position decoder
                         piece_num: *piece_num,
                     };
 
@@ -58,7 +61,11 @@ impl VariationTreeBuilder {
 
                     let variation_move = VariationMove {
                         chess_move: scid_move.clone(),
-                        move_number: if self.is_white_turn { self.move_counter } else { self.move_counter },
+                        move_number: if self.is_white_turn {
+                            self.move_counter
+                        } else {
+                            self.move_counter
+                        },
                         is_white_move: self.is_white_turn,
                         comments: Vec::new(),
                         nags: Vec::new(),
@@ -90,15 +97,16 @@ impl VariationTreeBuilder {
                 VariationGameElement::VariationStart { depth, .. } => {
                     // Save current position state before starting variation
                     self.position_state_manager.save_state(
-                        &self.current_position, 
-                        self.move_counter, 
-                        self.is_white_turn
+                        &self.current_position,
+                        self.move_counter,
+                        self.is_white_turn,
                     );
-                    
+
                     let start_index = if self.current_variation_stack.is_empty() {
                         self.main_line.len().saturating_sub(1)
                     } else {
-                        self.current_variation_stack.last()
+                        self.current_variation_stack
+                            .last()
                             .map(|v| v.moves.len().saturating_sub(1))
                             .unwrap_or(0)
                     };
@@ -128,10 +136,11 @@ impl VariationTreeBuilder {
                             self.variations.push(variation);
                         }
                     }
-                    
+
                     // Restore position state after finishing variation
-                    if let Some((restored_position, restored_move, restored_turn)) = 
-                        self.position_state_manager.restore_state() {
+                    if let Some((restored_position, restored_move, restored_turn)) =
+                        self.position_state_manager.restore_state()
+                    {
                         self.current_position = restored_position;
                         self.move_counter = restored_move;
                         self.is_white_turn = restored_turn;
@@ -168,7 +177,7 @@ impl VariationTreeBuilder {
             }
         }
 
-    Ok(VariationTree {
+        Ok(VariationTree {
             main_line: self.main_line.clone(),
             variations: self.variations.clone(),
         })

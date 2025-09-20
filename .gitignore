@@ -25,6 +25,9 @@ target
 # Crush development directory
 .crush/
 
+# helpful references for ai
 scidvspc/
+before-refactor/
+
 .docs/
 .claude/
