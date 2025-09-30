@@ -2,6 +2,7 @@ use crate::bridge::{GameState, PositionContext};
 use crate::bridge::position::GameMetadata;
 use crate::core::error::{Result, ScidError};
 use crate::formats::sg4::{StreamingGameElement, StreamingGameParseState, DecodedMove};
+use crate::bridge::moves::ScidToShakmaty;
 use shakmaty::{Chess, Move, Position, san::San};
 use std::collections::HashMap;
 
@@ -109,7 +110,8 @@ impl PgnExporter {
     
     /// Export optional PGN tags (ELO, ECO, etc.)
     fn export_optional_tags(&self, pgn: &mut String) -> Result<()> {
-        let metadata = self.game_state.metadata()
+        let binding = self.game_state.metadata();
+        let metadata = binding
             .as_ref()
             .ok_or_else(|| ScidError::invalid_format("Game metadata is required for PGN export".to_string()))?;
         
@@ -225,6 +227,11 @@ impl PgnExporter {
                 StreamingGameElement::Comment { .. } | StreamingGameElement::Nag { .. } => {
                     // Skip comments and NAGs if annotations are disabled
                     continue;
+                }
+                StreamingGameElement::GameEnd { result } => {
+                    // Format game result and append to PGN
+                    let result_text = crate::bridge::position::format_result(*result);
+                    pgn.push_str(&result_text);
                 }
             }
         }

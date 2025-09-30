@@ -6,14 +6,17 @@
 
 use crate::core::error::Result;
 use shakmaty::{Chess, Move};
+use crate::position::moves::{Color, Square};
 
 pub mod position;
 pub mod position_tracker;
+pub mod moves;
 
 // Re-export key types for easier access
 
 pub use position::*;
 pub use position_tracker::*;
+pub use moves::*;
 
 /// Core trait for converting SCID data to shakmaty types
 ///
@@ -103,4 +106,7 @@ pub trait BasicChessValidation {
 
     /// Get the game outcome if the game has ended
     fn game_outcome(&self) -> Option<shakmaty::Outcome>;
+
+    /// Helper method to find the king square for a given color
+    fn find_king_square(&self, color: Color) -> Square;
 }

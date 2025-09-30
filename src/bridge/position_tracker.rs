@@ -15,7 +15,7 @@ use shakmaty::{Chess, Color, File, Move, Position, Rank, Role, Square};
 ///
 /// This replicates SCID's Position class functionality using shakmaty for
 /// accurate chess rule validation and position management.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ScidPositionTracker {
     /// Current chess position using shakmaty
     current_position: Chess,
@@ -325,10 +325,14 @@ impl ScidPositionTracker {
         }
         
         // Check if pieces are correct color and type
-        let king_piece = self.current_position.board().piece_at(king_from)
-            .ok_or_else(|| return Ok(false))?;
-        let rook_piece = self.current_position.board().piece_at(rook_from)
-            .ok_or_else(|| return Ok(false))?;
+        let king_piece = match self.current_position.board().piece_at(king_from) {
+            Some(piece) => piece,
+            None => return Ok(false),
+        };
+        let rook_piece = match self.current_position.board().piece_at(rook_from) {
+            Some(piece) => piece,
+            None => return Ok(false),
+        };
         
         if king_piece.color != self.to_move || king_piece.role != Role::King {
             return Ok(false);
@@ -351,7 +355,7 @@ impl ScidPositionTracker {
                 continue; // Skip king and rook squares
             }
             
-            let square = Square::from_coords(File::from_index(file), Rank::from_index(rank));
+            let square = Square::from_coords(File::new(file as u32), Rank::new(rank as u32));
             if self.current_position.board().piece_at(square).is_some() {
                 return Ok(false); // Path blocked
             }
@@ -375,63 +379,7 @@ impl ScidPositionTracker {
         false
     }
 
-    /// Verify castling legality by checking rook presence and position
-    fn verify_castling_legality(&self, king_square: Square, rook_square: Square) -> Result<()> {
-        // Verify rook is present at expected square
-        let rook_piece = self
-            .current_position
-            .board()
-            .piece_at(rook_square)
-            .ok_or_else(|| {
-                ScidError::conversion_error(format!(
-                    "No rook found at {} for castling",
-                    rook_square
-                ))
-            })?;
-
-        // Verify it's actually a rook of the correct color
-        if rook_piece.role != Role::Rook {
-            return Err(ScidError::conversion_error(format!(
-                "Expected rook at {}, found {:?}",
-                rook_square, rook_piece.role
-            )));
-        }
-
-        if rook_piece.color != self.to_move {
-            return Err(ScidError::conversion_error(format!(
-                "Rook at {} belongs to {:?}, but it's {:?} to move",
-                rook_square, rook_piece.color, self.to_move
-            )));
-        }
-
-        // Additional verification: ensure king is on correct square
-        let king_piece = self
-            .current_position
-            .board()
-            .piece_at(king_square)
-            .ok_or_else(|| {
-                ScidError::conversion_error(format!(
-                    "No king found at {} for castling",
-                    king_square
-                ))
-            })?;
-
-        if king_piece.role != Role::King {
-            return Err(ScidError::conversion_error(format!(
-                "Expected king at {}, found {:?}",
-                king_square, king_piece.role
-            )));
-        }
-
-        if king_piece.color != self.to_move {
-            return Err(ScidError::conversion_error(format!(
-                "King at {} belongs to {:?}, but it's {:?} to move",
-                king_square, king_piece.color, self.to_move
-            )));
-        }
-
-        Ok(())
-    }
+    
 
     /// Check if pawn move is en passant (legacy heuristic method - replaced by SCID data)
     fn check_en_passant_move(&self, from: Square, to: Square) -> Result<Option<Move>> {

@@ -285,8 +285,17 @@ fn test_enhanced_position_tracking_integration() -> Result<()> {
     
     // Test piece list integration
     let position = game_state.current_position();
-    let white_pieces = position.board().pieces_of_color(Color::White);
-    let black_pieces = position.board().pieces_of_color(Color::Black);
+    let mut white_pieces = Vec::new();
+    let mut black_pieces = Vec::new();
+    for square in shakmaty::Square::ALL {
+        if let Some(piece) = position.board().piece_at(square) {
+            if piece.color == shakmaty::Color::White {
+                white_pieces.push(piece);
+            } else if piece.color == shakmaty::Color::Black {
+                black_pieces.push(piece);
+            }
+        }
+    }
     
     assert_eq!(white_pieces.len(), 16, "White should have 16 pieces");
     assert_eq!(black_pieces.len(), 16, "Black should have 16 pieces");

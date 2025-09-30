@@ -5,6 +5,7 @@ pub mod si4;
 pub mod sn4;
 
 use crate::core::error::Result;
+use crate::bridge::position::format_result;
 use crate::formats::sg4::Sg4File;
 use crate::formats::si4::Si4File;
 use crate::formats::sn4::Sn4File;
@@ -112,17 +113,25 @@ impl ScidDatabase {
             if let Ok(Some(black_name)) = self.get_player_name(game_index.black_id) {
                 if let Ok(Some(event_name)) = self.get_event_name(game_index.event_id) {
                     if let Ok(Some(site_name)) = self.get_site_name(game_index.site_id) {
-                        let metadata = crate::bridge::GameMetadata::new(
+                        let mut metadata = crate::bridge::GameMetadata::new(
                             white_name,
                             black_name,
                             event_name,
                             site_name,
                             format!("{:04}.{:02}.{:02}", game_index.year, game_index.month, game_index.day),
-                            decode_result(game_index.result),
-                            if game_index.white_elo > 0 { Some(game_index.white_elo) } else { None },
-                            if game_index.black_elo > 0 { Some(game_index.black_elo) } else { None },
-                            if game_index.eco > 0 { Some(format!("ECO{}", game_index.eco)) } else { None },
+                            format_result(game_index.result),
                         );
+                        
+                        // Set optional fields
+                        if game_index.white_elo > 0 {
+                            metadata.white_elo = Some(game_index.white_elo);
+                        }
+                        if game_index.black_elo > 0 {
+                            metadata.black_elo = Some(game_index.black_elo);
+                        }
+                        if game_index.eco > 0 {
+                            metadata.eco = Some(format!("ECO{}", game_index.eco));
+                        }
                         game_state.set_metadata(metadata);
                     }
                 }

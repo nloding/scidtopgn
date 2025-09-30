@@ -227,3 +227,19 @@ impl Color {
         }
     }
 }
+
+// Conversion implementations to shakmaty types
+impl From<Square> for shakmaty::Square {
+    fn from(square: Square) -> Self {
+        shakmaty::Square::new(square.0 as u32)
+    }
+}
+
+impl From<Color> for shakmaty::Color {
+    fn from(color: Color) -> Self {
+        match color {
+            Color::White => shakmaty::Color::White,
+            Color::Black => shakmaty::Color::Black,
+        }
+    }
+}

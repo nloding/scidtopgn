@@ -67,6 +67,7 @@
 
 // Declare internal modules as private
 mod bridge;
+pub mod cli;
 mod core;
 mod formats;
 mod pgn;
@@ -112,6 +113,7 @@ pub use crate::pgn::PgnExporter;
 pub use crate::variation::{VariationTree, Variation, VariationMove, VariationGameElement};
 
 // Re-export commonly used types that users might expect
+pub use crate::cli::{Cli, Commands};
 pub use crate::formats::si4::GameIndex;
 pub use crate::formats::sn4::NameRecord;
 pub use crate::formats::ScidDatabase;

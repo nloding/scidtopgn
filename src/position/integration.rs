@@ -21,7 +21,11 @@ pub fn scid_move_to_decoded_move(scid_move: &ScidMove, raw_bytes: &[u8]) -> Deco
                 None
             };
 
-            MoveInterpretation::Pawn { promotion }
+            MoveInterpretation::Pawn { 
+                direction: "unknown".to_string(), 
+                promotion,
+                is_en_passant: None,
+            }
         }
         crate::position::PieceType::King => {
             MoveInterpretation::King {
@@ -32,7 +36,9 @@ pub fn scid_move_to_decoded_move(scid_move: &ScidMove, raw_bytes: &[u8]) -> Deco
         crate::position::PieceType::Queen => MoveInterpretation::Queen,
         crate::position::PieceType::Rook => MoveInterpretation::Rook,
         crate::position::PieceType::Bishop => MoveInterpretation::Bishop,
-        crate::position::PieceType::Knight => MoveInterpretation::Knight,
+        crate::position::PieceType::Knight => MoveInterpretation::Knight {
+            l_shape_code: scid_move.piece_num,
+        },
         _ => MoveInterpretation::Unknown {
             reason: format!("Unknown piece type: {:?}", scid_move.moving_piece),
         },

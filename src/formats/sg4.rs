@@ -357,7 +357,7 @@ impl<'a> GameIterator<'a> {
             7 => (7, true, "King castle queenside"),
             8 => (8, false, "King left"),
             9 => (9, false, "King up-left"),
-            _ => (move_value, false, format!("Unknown king move: {}", move_value)),
+            _ => (move_value, false, "Unknown king move"),
         };
         
         MoveInterpretation::King {
@@ -376,7 +376,7 @@ impl<'a> GameIterator<'a> {
             5 => "Queen down-left",
             6 => "Queen left",
             7 => "Queen up-left",
-            _ => format!("Unknown queen move: {}", move_value),
+            _ => "Unknown queen move",
         };
         
         MoveInterpretation::Queen
@@ -455,20 +455,20 @@ impl<'a> GameIterator<'a> {
             0 => ("forward", None, None, "Pawn forward 1 square"),
             1 => ("capture-left", None, None, "Pawn capture left"),
             2 => ("capture-right", None, None, "Pawn capture right"),
-            3 => ("forward", Some("Queen"), None, "Pawn forward 1, promote to Queen"),
-            4 => ("capture-left", Some("Queen"), None, "Pawn capture left, promote to Queen"),
-            5 => ("capture-right", Some("Queen"), None, "Pawn capture right, promote to Queen"),
-            6 => ("forward", Some("Rook"), None, "Pawn forward 1, promote to Rook"),
-            7 => ("capture-left", Some("Rook"), None, "Pawn capture left, promote to Rook"),
-            8 => ("capture-right", Some("Rook"), None, "Pawn capture right, promote to Rook"),
-            9 => ("forward", Some("Bishop"), None, "Pawn forward 1, promote to Bishop"),
-            10 => ("capture-left", Some("Bishop"), None, "Pawn capture left, promote to Bishop"),
-            11 => ("capture-right", Some("Bishop"), None, "Pawn capture right, promote to Bishop"),
-            12 => ("forward", Some("Knight"), None, "Pawn forward 1, promote to Knight"),
-            13 => ("capture-left", Some("Knight"), None, "Pawn capture left, promote to Knight"),
-            14 => ("capture-right", Some("Knight"), None, "Pawn capture right, promote to Knight"),
+            3 => ("forward", Some("Queen".to_string()), None, "Pawn forward 1, promote to Queen"),
+            4 => ("capture-left", Some("Queen".to_string()), None, "Pawn capture left, promote to Queen"),
+            5 => ("capture-right", Some("Queen".to_string()), None, "Pawn capture right, promote to Queen"),
+            6 => ("forward", Some("Rook".to_string()), None, "Pawn forward 1, promote to Rook"),
+            7 => ("capture-left", Some("Rook".to_string()), None, "Pawn capture left, promote to Rook"),
+            8 => ("capture-right", Some("Rook".to_string()), None, "Pawn capture right, promote to Rook"),
+            9 => ("forward", Some("Bishop".to_string()), None, "Pawn forward 1, promote to Bishop"),
+            10 => ("capture-left", Some("Bishop".to_string()), None, "Pawn capture left, promote to Bishop"),
+            11 => ("capture-right", Some("Bishop".to_string()), None, "Pawn capture right, promote to Bishop"),
+            12 => ("forward", Some("Knight".to_string()), None, "Pawn forward 1, promote to Knight"),
+            13 => ("capture-left", Some("Knight".to_string()), None, "Pawn capture left, promote to Knight"),
+            14 => ("capture-right", Some("Knight".to_string()), None, "Pawn capture right, promote to Knight"),
             15 => ("double-forward", None, Some(true), "Pawn double forward (en passant possible)"),
-            _ => ("unknown", None, None, format!("Unknown pawn move: {}", move_value)),
+            _ => ("unknown", None, None, "Unknown pawn move"),
         };
         
         MoveInterpretation::Pawn {
@@ -754,7 +754,7 @@ pub fn parse_pgn_tags_with_streaming(data: &[u8]) -> Result<Vec<StreamingGameEle
         match byte {
             ENCODE_END_GAME => {
                 if current_offset + 1 < data.len() {
-                    elements.push(StreamingGameElement::GameEnd { offset: current_offset });
+                    elements.push(StreamingGameElement::GameEnd { result: data[current_offset + 1] });
                     current_offset += 2;
                 } else {
                     current_offset += 1;
@@ -764,8 +764,7 @@ pub fn parse_pgn_tags_with_streaming(data: &[u8]) -> Result<Vec<StreamingGameEle
             ENCODE_NAG => {
                 if current_offset + 1 < data.len() {
                     elements.push(StreamingGameElement::Nag {
-                        nag_value: data[current_offset + 1],
-                        offset: current_offset,
+                        nag_code: data[current_offset + 1],
                     });
                     current_offset += 2;
                 } else {
@@ -776,18 +775,17 @@ pub fn parse_pgn_tags_with_streaming(data: &[u8]) -> Result<Vec<StreamingGameEle
                 if let Ok(comment) = parse_simple_string(&data[current_offset..], &mut current_offset) {
                     elements.push(StreamingGameElement::Comment {
                         text: comment,
-                        offset: start_offset,
                     });
                 } else {
                     current_offset += 1;
                 }
             }
             ENCODE_START_MARKER => {
-                elements.push(StreamingGameElement::VariationStart { offset: current_offset });
+                elements.push(StreamingGameElement::VariationStart);
                 current_offset += 1;
             }
             ENCODE_END_MARKER => {
-                elements.push(StreamingGameElement::VariationEnd { offset: current_offset });
+                elements.push(StreamingGameElement::VariationEnd);
                 current_offset += 1;
             }
             _ => {
@@ -798,21 +796,13 @@ pub fn parse_pgn_tags_with_streaming(data: &[u8]) -> Result<Vec<StreamingGameEle
                 if piece_num == 2 && move_value >= 8 && current_offset + 1 < data.len() {
                     // Queen diagonal move - 2 bytes
                     elements.push(StreamingGameElement::Move {
-                        piece_num,
-                        move_value,
-                        raw_bytes: vec![byte, data[current_offset + 1]],
-                        offset: current_offset,
-                        bytes_consumed: 2,
+                        raw: vec![byte, data[current_offset + 1]],
                     });
                     current_offset += 2;
                 } else {
                     // Single byte move
                     elements.push(StreamingGameElement::Move {
-                        piece_num,
-                        move_value,
-                        raw_bytes: vec![byte],
-                        offset: current_offset,
-                        bytes_consumed: 1,
+                        raw: vec![byte],
                     });
                     current_offset += 1;
                 }
@@ -1030,7 +1020,7 @@ pub enum StreamingGameElement {
     GameEnd { result: u8 },
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct StreamingGameParseState {
     pub elements: Vec<StreamingGameElement>,
 }

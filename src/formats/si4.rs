@@ -15,7 +15,7 @@ pub struct ScidHeader {
     pub custom_flags: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GameFlags {
     pub start: bool,
     pub promotions: bool,
@@ -35,7 +35,7 @@ pub struct GameFlags {
     pub user: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GameIndex {
     pub offset: u32,
     pub length: u32,
