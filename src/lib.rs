@@ -73,7 +73,6 @@ mod formats;
 mod pgn;
 mod position;
 mod variation;
-mod variation_builder;
 
 /// Curated, minimal public API for downstream consumers.
 ///
@@ -97,7 +96,7 @@ pub mod api {
     pub use crate::pgn::{PgnExporter, ExportOptions};
 
     // Re-export position tracking types
-    pub use crate::bridge::ScidPositionTracker;
+    pub use crate::bridge::position_tracker::ScidPositionTracker;
 
     // Re-export PGN header management
     pub use crate::pgn::PgnHeader;
@@ -119,7 +118,7 @@ pub use crate::formats::sn4::NameRecord;
 pub use crate::formats::ScidDatabase;
 
 // Re-export position tracking for advanced users
-pub use crate::bridge::ScidPositionTracker;
+pub use crate::bridge::position_tracker::ScidPositionTracker;
 
 // Re-export PGN header management
 pub use crate::pgn::PgnHeader;
@@ -204,7 +203,7 @@ pub mod config {
         /// Set the global configuration
         pub fn set_global(config: Config) {
             static GLOBAL_CONFIG: std::sync::OnceLock<Config> = std::sync::OnceLock::new();
-            GLOBAL_CONFIG.set(config);
+            let _ = GLOBAL_CONFIG.set(config);
         }
     }
 }

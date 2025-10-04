@@ -107,7 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         }
         #[cfg(debug_assertions)]
-        Commands::Dev { benchmark, memory, test_db, debug } => {
+        Commands::Dev { benchmark, memory, test_db: _, debug } => {
             println!("SCIDtoPGN Development Mode");
             
             if debug {

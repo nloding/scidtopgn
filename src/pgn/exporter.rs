@@ -1,7 +1,6 @@
 use crate::bridge::{GameState, PositionContext};
-use crate::bridge::position::GameMetadata;
 use crate::core::error::{Result, ScidError};
-use crate::formats::sg4::{StreamingGameElement, StreamingGameParseState, DecodedMove};
+use crate::formats::sg4::{StreamingGameElement, StreamingGameParseState};
 use crate::bridge::moves::ScidToShakmaty;
 use shakmaty::{Chess, Move, Position, san::San};
 use std::collections::HashMap;

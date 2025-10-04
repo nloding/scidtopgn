@@ -4,9 +4,7 @@
 // to shakmaty chess types. The bridge pattern allows the SCID parser to
 // focus on binary format parsing while delegating chess logic to shakmaty.
 
-use crate::core::error::Result;
 use shakmaty::{Chess, Move};
-use crate::position::moves::{Color, Square};
 
 pub mod position;
 pub mod position_tracker;
@@ -15,28 +13,9 @@ pub mod moves;
 // Re-export key types for easier access
 
 pub use position::*;
-pub use position_tracker::*;
-pub use moves::*;
 
 /// Core trait for converting SCID data to shakmaty types
 ///
-/// This trait enables conversion of SCID-specific binary data structures
-/// to their corresponding shakmaty chess representations. The position
-/// parameter provides context for moves that depend on current board state.
-pub trait ScidToShakmaty {
-    /// The resulting shakmaty type after conversion
-    type Output;
-
-    /// Convert SCID data to shakmaty representation
-    ///
-    /// # Arguments
-    /// * `position` - Current chess position for context-dependent conversions
-    ///
-    /// # Returns
-    /// * `Result<Self::Output>` - Converted shakmaty type or conversion error
-    fn to_shakmaty(&self, position: &Chess) -> Result<Self::Output>;
-}
-
 /// Trait for types that can provide chess position context
 ///
 /// This trait allows access to the current chess position and move history,
@@ -86,27 +65,28 @@ pub trait ChessNotation {
     }
 }
 
-/// Trait for basic chess move and position validation
+/// Trait for basic chess validation operations
 ///
-/// This trait provides basic validation methods to ensure that converted
-/// moves and positions are legal according to chess rules.
-/// For comprehensive validation, use the ChessValidation trait from validation module.
+/// This trait provides methods for validating chess moves and checking
+/// game state conditions like check, checkmate, and stalemate.
+#[allow(dead_code)]
 pub trait BasicChessValidation {
     /// Check if a move is legal in the current position
     fn is_move_legal(&self, chess_move: &Move) -> bool;
 
-    /// Check if the position is in check
+    /// Check if the current side to move is in check
     fn is_in_check(&self) -> bool;
 
-    /// Check if the position is checkmate
+    /// Check if the current position is checkmate
     fn is_checkmate(&self) -> bool;
 
-    /// Check if the position is stalemate
+    /// Check if the current position is stalemate
     fn is_stalemate(&self) -> bool;
 
     /// Get the game outcome if the game has ended
     fn game_outcome(&self) -> Option<shakmaty::Outcome>;
 
-    /// Helper method to find the king square for a given color
-    fn find_king_square(&self, color: Color) -> Square;
+    /// Find the square of the king for the given color
+    fn find_king_square(&self, color: crate::position::moves::Color) -> crate::position::moves::Square;
 }
+

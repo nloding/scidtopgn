@@ -6,6 +6,7 @@ use crate::position::{Color, PieceType, ScidMove, ScidPosition, Square};
 
 /// Main move decoder - replicates SCID's decodeMove function
 /// From scidvspc/src/game.cpp decodeMove()
+#[allow(dead_code)]
 pub fn decode_move(position: &ScidPosition, move_byte: u8) -> Result<ScidMove, String> {
     // Step 1: Extract piece number and move value
     // From SCID: pieceNum = (val >> 4)
@@ -282,6 +283,7 @@ pub fn decode_queen(move_value: u8, scid_move: &mut ScidMove) -> Result<(), Stri
 
 /// Main move decoder with stream support for multi-byte moves
 /// Based on SCID's decodeMove() but with ByteBuffer-compatible streaming
+#[allow(dead_code)]
 pub fn decode_move_with_stream(
     position: &ScidPosition,
     stream: &mut ScidByteStream,

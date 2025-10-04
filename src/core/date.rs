@@ -5,6 +5,7 @@ use crate::core::error::{Result, ScidError};
 
 /// Create a SCID date from year, month, day components
 /// SCID encoding: ((year << 9) | (month << 5) | day)
+#[allow(dead_code)]
 pub fn date_make(year: u32, month: u32, day: u32) -> u32 {
     (year << 9) | (month << 5) | day
 }
@@ -25,16 +26,19 @@ pub fn date_get_day(date: u32) -> u32 {
 }
 
 /// Set lower 20 bits of a u32 value
+#[allow(dead_code)]
 pub fn u32_set_low_20(u: u32, x: u32) -> u32 {
     (u & 0xFFF00000) | (x & 0x000FFFFF)
 }
 
 /// Set upper 12 bits of a u32 value
+#[allow(dead_code)]
 pub fn u32_set_high_12(u: u32, x: u32) -> u32 {
     (u & 0x000FFFFF) | ((x & 0xFFF) << 20)
 }
 
 /// Set game date in SCID dates field (lower 20 bits)
+#[allow(dead_code)]
 pub fn scid_set_date(existing_dates: u32, year: u32, month: u32, day: u32) -> u32 {
     let date = date_make(year, month, day);
     u32_set_low_20(existing_dates, date)
@@ -42,6 +46,7 @@ pub fn scid_set_date(existing_dates: u32, year: u32, month: u32, day: u32) -> u3
 
 /// Set event date in SCID dates field (upper 12 bits)
 /// Event dates are stored as relative offsets when within ±3 years of game date
+#[allow(dead_code)]
 pub fn scid_set_event_date(existing_dates: u32, edate: u32) -> u32 {
     let game_date = existing_dates & 0x000FFFFF;
     
@@ -89,6 +94,7 @@ pub fn scid_get_event_date(dates_field: u32) -> Option<(u32, u32, u32)> {
 }
 
 /// Validate date components
+#[allow(dead_code)]
 pub fn validate_date(year: u32, month: u32, day: u32) -> Result<()> {
     if year < 1000 || year > 3000 {
         return Err(ScidError::InvalidDate);
@@ -124,6 +130,7 @@ fn is_leap_year(year: u32) -> bool {
 }
 
 /// Format SCID date as PGN date string (YYYY.MM.DD)
+#[allow(dead_code)]
 pub fn format_pgn_date(date: u32) -> String {
     let year = date_get_year(date);
     let month = date_get_month(date);
@@ -133,6 +140,7 @@ pub fn format_pgn_date(date: u32) -> String {
 }
 
 /// Parse PGN date string (YYYY.MM.DD) to SCID date
+#[allow(dead_code)]
 pub fn parse_pgn_date(pgn_date: &str) -> Result<u32> {
     let parts: Vec<&str> = pgn_date.split('.').collect();
     if parts.len() != 3 {

@@ -1,4 +1,5 @@
 /// Helper function to parse SCID promotion piece string to shakmaty Role
+#[allow(dead_code)]
 fn parse_promotion_piece_scid(promo: &str) -> Result<shakmaty::Role> {
     match promo {
         "q" | "Q" => Ok(shakmaty::Role::Queen),
@@ -193,7 +194,7 @@ fn convert_king_move(direction_code: u8, piece_num: u8, position: &Chess) -> Res
         }
         
         // Determine king and rook squares for castling
-        let (king_to, rook_from, rook_to) = if direction_code == 9 {
+        let (king_to, rook_from, _rook_to) = if direction_code == 9 {
             // Kingside castling
             if position.turn() == Color::White {
                 (Square::G1, Square::H1, Square::F1) // White: e1->g1, h1->f1
@@ -444,7 +445,7 @@ fn convert_knight_move(move_value: u8, piece_num: u8, position: &Chess) -> Resul
 
 /// Convert SCID pawn move to shakmaty move
 /// Pawn moves include direction and promotion information based on SCID specification
-fn convert_pawn_move(move_value: u8, piece_num: u8, promotion: Option<&str>, position: &Chess) -> Result<Move> {
+fn convert_pawn_move(move_value: u8, piece_num: u8, _promotion: Option<&str>, position: &Chess) -> Result<Move> {
     let from = get_piece_square_by_number(piece_num, position.turn(), position)?;
     
     // SCID pawn encoding based on scidvspc/src/game.cpp decodePawn
@@ -562,7 +563,7 @@ fn get_piece_square_by_number(piece_num: u8, color: Color, position: &Chess) -> 
     }
     
     // Find the piece that matches the SCID piece number
-    for (index, piece) in pieces.iter().enumerate() {
+    for (_index, piece) in pieces.iter().enumerate() {
         // We need to find which square this piece is on
         // Since we collected pieces without their squares, we need to search again
         let piece_square = shakmaty::Square::ALL
@@ -632,7 +633,7 @@ fn create_shakmaty_move(
     role: Role,
     from: Square,
     to: Option<Square>,
-    is_capture: bool,
+    _is_capture: bool,
     is_promotion: bool,
     promotion_role: Option<Role>,
     position: &Chess,

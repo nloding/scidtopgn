@@ -4,12 +4,12 @@
 // shakmaty's Chess type for accurate position tracking and move validation.
 // It provides the GameState struct that maintains both position and move history.
 
-use crate::bridge::{BasicChessValidation, ChessNotation, PositionContext, ScidPositionTracker};
+use crate::bridge::{BasicChessValidation, ChessNotation, PositionContext};
+use crate::bridge::position_tracker::ScidPositionTracker;
 use crate::core::error::{Result, ScidError};
 use crate::formats::sg4::DecodedMove;
-use crate::formats::sn4::NameRecord;
 use crate::position::moves::{Square, Color};
-use shakmaty::{Chess, Move, Position, Role, Rank};
+use shakmaty::{Chess, Move, Position, Role};
 
 /// Convert SCID result code to PGN result string
 pub fn format_result(result_code: u8) -> String {
@@ -108,7 +108,7 @@ impl GameState {
         }
         
         // Parse active color (part 1)
-        let active_color = match parts[1] {
+        let _active_color = match parts[1] {
             "w" => Color::White,
             "b" => Color::Black,
             _ => return Err(ScidError::invalid_format("Invalid active color in FEN")),
@@ -123,7 +123,7 @@ impl GameState {
         let _castling_none = castling.contains('-');
         
         // Parse en passant target (part 3)
-        let en_passant = if parts[3] != "-" {
+        let _en_passant = if parts[3] != "-" {
             Some(parts[3].parse::<u8>().map_err(|_| {
                 ScidError::invalid_format("Invalid en passant square in FEN")
             })?)
@@ -143,7 +143,7 @@ impl GameState {
         
         // For now, create a standard position since shakmaty doesn't support FEN parsing directly
         // In a full implementation, we would use the parsed FEN data to reconstruct the position
-        let mut game_state = Self {
+        let game_state = Self {
             position_tracker: ScidPositionTracker::new(),
             metadata: None,
         };
@@ -195,7 +195,7 @@ impl GameState {
     }
 
     /// Add a comment to the current position
-    pub fn add_comment(&mut self, comment: String) {
+    pub fn add_comment(&mut self, _comment: String) {
         // Store comment with the current position
         // In a full implementation, comments would be associated with specific moves
         // For now, we'll just acknowledge that comments are supported
@@ -221,7 +221,7 @@ impl GameState {
     }
 
     /// Add a NAG (Numeric Annotation Glyph) symbol
-    pub fn add_nag(&mut self, nag: u8) {
+    pub fn add_nag(&mut self, _nag: u8) {
         // Store NAG annotation for the current position
         // NAG values are numeric codes that map to standard chess annotation symbols
         // For now, we'll just acknowledge that NAGs are supported
@@ -381,7 +381,7 @@ impl BasicChessValidation for GameState {
                 }
             }
         }
-        current_pieces.iter().any(|&(square, piece)| {
+        current_pieces.iter().any(|&(square, _piece)| {
             if let Some(legal_moves) = self.get_legal_moves_for_piece(
                 Self::convert_shakmaty_square(square), 
                 Self::convert_shakmaty_color(self.position_tracker.to_move())
@@ -408,7 +408,7 @@ impl BasicChessValidation for GameState {
                 }
             }
         }
-        !current_pieces.iter().any(|&(square, piece)| {
+        !current_pieces.iter().any(|&(square, _piece)| {
             if let Some(legal_moves) = self.get_legal_moves_for_piece(
                 Self::convert_shakmaty_square(square), 
                 Self::convert_shakmaty_color(self.position_tracker.to_move())
@@ -457,6 +457,7 @@ impl BasicChessValidation for GameState {
 }
 
 /// Conversion functions between shakmaty and local position types
+#[allow(dead_code)]
 impl GameState {
     /// Convert shakmaty::Square to local Square
     fn convert_shakmaty_square(shakmaty_square: shakmaty::Square) -> Square {
@@ -480,6 +481,7 @@ impl GameState {
     }
 }
 
+#[allow(dead_code)]
 impl GameState {
     /// Helper method to get legal moves for a piece at a given square
     fn get_legal_moves_for_piece(&self, square: Square, color: Color) -> Option<Vec<Square>> {

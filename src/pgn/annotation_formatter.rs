@@ -2,8 +2,10 @@ use crate::formats::sg4::NagProcessor;
 use crate::variation::VariationMove;
 
 /// Formats annotations for PGN output
+#[allow(dead_code)]
 pub struct AnnotationFormatter;
 
+#[allow(dead_code)]
 impl AnnotationFormatter {
     /// Format a move with all its annotations for PGN
     pub fn format_move_with_annotations(mv: &VariationMove) -> String {

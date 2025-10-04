@@ -21,6 +21,7 @@ pub struct ScidDatabase {
     /// SCID names file containing player and event names
     sn4_file: Sn4File,
     /// SCID games file containing actual game data
+    #[allow(dead_code)]
     sg4_file: Sg4File,
     /// Database validation state
     validated: bool,
@@ -76,7 +77,7 @@ impl ScidDatabase {
         
         // Validate that all game indices are within bounds
         for i in 0..si4_game_count {
-            let game_index = self.si4_file.get_game(i)?;
+            let _game_index = self.si4_file.get_game(i)?;
             
             // TODO: Add sg4 bounds validation when methods are available
         }
@@ -148,7 +149,7 @@ impl ScidDatabase {
     /// Get an iterator over all games in the database
     /// 
     /// Returns an iterator that yields ScidGame objects for each game in the database.
-    pub fn games(&self) -> GameIterator {
+    pub fn games(&self) -> GameIterator<'_> {
         GameIterator {
             database: self,
             current_index: 0,

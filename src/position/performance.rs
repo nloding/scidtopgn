@@ -7,6 +7,7 @@ use crate::position::{ScidByteStream, ScidPosition};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 pub struct PositionTrackingMetrics {
     pub total_moves_processed: usize,
     pub successful_decodes: usize,
@@ -21,6 +22,7 @@ pub struct PositionTrackingMetrics {
     pub memory_usage_kb: usize,
 }
 
+#[allow(dead_code)]
 impl PositionTrackingMetrics {
     pub fn record_decode_attempt(&mut self, success: bool, duration: Duration) {
         self.total_moves_processed += 1;
@@ -158,11 +160,13 @@ impl PositionTrackingMetrics {
 
 /// Enhanced position tracker with performance monitoring (decoder-based)
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct MonitoredPositionTracker {
     position: ScidPosition,
     metrics: PositionTrackingMetrics,
 }
 
+#[allow(dead_code)]
 impl MonitoredPositionTracker {
     pub fn new() -> Self {
         Self {
@@ -252,12 +256,19 @@ impl MonitoredPositionTracker {
 
 /// Minimal compatibility struct replacing sg4::PositionTrackerStats usage here
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct PositionTrackerStatsCompat {
+    #[allow(dead_code)]
     pub total_moves: usize,
+    #[allow(dead_code)]
     pub successful_moves: usize,
+    #[allow(dead_code)]
     pub failed_moves: usize,
+    #[allow(dead_code)]
     pub success_rate: f64,
+    #[allow(dead_code)]
     pub position_hash: u64,
+    #[allow(dead_code)]
     pub current_turn: crate::position::Color,
 }
 
@@ -288,11 +299,13 @@ impl PositionTrackerStatsCompat {
 }
 
 /// Performance monitoring utilities
+#[allow(dead_code)]
 pub struct PerformanceMonitor {
     start_time: Option<Instant>,
     operation_name: String,
 }
 
+#[allow(dead_code)]
 impl PerformanceMonitor {
     pub fn new(operation_name: &str) -> Self {
         Self {
@@ -325,6 +338,7 @@ impl PerformanceMonitor {
 }
 
 /// Benchmarking utilities for performance testing
+#[allow(dead_code)]
 pub fn benchmark_position_tracking<F>(name: &str, iterations: usize, mut operation: F)
 where
     F: FnMut() -> Result<(), String>,

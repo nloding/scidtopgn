@@ -4,8 +4,11 @@ use std::fs::File;
 use std::path::Path;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Sn4Header {
+    #[allow(dead_code)]
     pub magic: [u8; 8],
+    #[allow(dead_code)]
     pub timestamp: u32,
     pub num_names_player: u32,
     pub num_names_event: u32,
@@ -210,6 +213,7 @@ impl Sn4File {
         ((data[offset] as u32) << 16) | ((data[offset + 1] as u32) << 8) | (data[offset + 2] as u32)
     }
     
+    #[allow(dead_code)]
     pub fn header(&self) -> &Sn4Header {
         &self.header
     }
@@ -240,7 +244,8 @@ impl Sn4File {
         Ok(None)
     }
     
-    pub fn iter_names(&self, name_type: NameType) -> NameIterator {
+    #[allow(dead_code)]
+    pub fn iter_names(&self, name_type: NameType) -> NameIterator<'_> {
         let (offset, num_names, max_frequency) = match name_type {
             NameType::Player => (self.player_offset, self.header.num_names_player, self.header.max_frequency_player),
             NameType::Event => (self.event_offset, self.header.num_names_event, self.header.max_frequency_event),

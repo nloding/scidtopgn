@@ -5,13 +5,20 @@ use std::fs::File;
 use std::path::Path;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ScidHeader {
+    #[allow(dead_code)]
     pub magic: [u8; 8],
+    #[allow(dead_code)]
     pub version: u16,
+    #[allow(dead_code)]
     pub base_type: u32,
     pub num_games: u32,
+    #[allow(dead_code)]
     pub auto_load: u32,
+    #[allow(dead_code)]
     pub description: String,
+    #[allow(dead_code)]
     pub custom_flags: Vec<String>,
 }
 
@@ -124,6 +131,7 @@ impl Si4File {
         }
     }
     
+    #[allow(dead_code)]
     pub fn header(&self) -> &ScidHeader {
         &self.header
     }
@@ -132,7 +140,8 @@ impl Si4File {
         self.header.num_games
     }
     
-    pub fn games(&self) -> GameIterator {
+    #[allow(dead_code)]
+    pub fn games(&self) -> GameIterator<'_> {
         GameIterator {
             si4: self,
             current_index: 0,
@@ -294,6 +303,7 @@ impl<'a> Iterator for GameIterator<'a> {
     }
 }
 
+#[allow(dead_code)]
 pub fn decode_result(result: u8) -> &'static str {
     match result {
         0 => "*",

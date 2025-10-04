@@ -1,9 +1,12 @@
 /// Ensures PGN output complies with official PGN standards
+/// Validates and formats PGN content according to official PGN standards
+#[allow(dead_code)]
 pub struct PgnStandardsChecker {
     /// Line length limit (PGN standard recommends 80 characters)
     max_line_length: usize,
 }
 
+#[allow(dead_code)]
 impl PgnStandardsChecker {
     pub fn new() -> Self {
         Self {

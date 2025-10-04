@@ -7,6 +7,7 @@
 
 /// SCID-compatible byte stream reader
 /// Replicates functionality from scidvspc/src/bytebuf.h ByteBuffer class
+#[allow(dead_code)]
 pub struct ScidByteStream<'a> {
     /// Raw game data bytes
     buffer: &'a [u8],
@@ -21,6 +22,7 @@ pub struct ScidByteStream<'a> {
     error_state: Option<String>,
 }
 
+#[allow(dead_code)]
 impl<'a> ScidByteStream<'a> {
     /// Create new stream from game data
     /// Equivalent to SCID's ByteBuffer constructor with external buffer

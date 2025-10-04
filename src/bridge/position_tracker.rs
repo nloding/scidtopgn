@@ -382,6 +382,7 @@ impl ScidPositionTracker {
     
 
     /// Check if pawn move is en passant (legacy heuristic method - replaced by SCID data)
+    #[allow(dead_code)]
     fn check_en_passant_move(&self, from: Square, to: Square) -> Result<Option<Move>> {
         // Check if this is a diagonal pawn move to an empty square
         if self.current_position.board().piece_at(to).is_none() {
@@ -805,6 +806,7 @@ impl ScidPositionTracker {
     }
 
     /// Enhanced conversion with detailed error diagnostics (for debugging)
+    #[allow(dead_code)]
     fn convert_scid_to_shakmaty_with_diagnostics(
         &self,
         scid_move: &DecodedMove,
@@ -894,6 +896,7 @@ impl ScidPositionTracker {
 }
 
 /// Extract promotion piece from SCID move data
+#[allow(dead_code)]
 fn extract_promotion_from_scid_move(scid_move: &DecodedMove) -> Result<Role> {
     match &scid_move.interpretation {
         MoveInterpretation::Pawn { promotion, .. } => promotion

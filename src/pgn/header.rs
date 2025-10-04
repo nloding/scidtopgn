@@ -1,5 +1,4 @@
 use crate::bridge::GameState;
-use crate::bridge::position::GameMetadata;
 use crate::core::error::{Result, ScidError};
 use std::collections::HashMap;
 
@@ -280,7 +279,7 @@ impl PgnHeader {
             ScidError::invalid_format(format!("Invalid ELO value: {}", elo))
         })?;
         
-        if elo_num < 0 || elo_num > 4000 {
+        if elo_num > 4000 {
             return Err(ScidError::invalid_format(
                 format!("ELO value out of range: {}", elo_num)
             ));

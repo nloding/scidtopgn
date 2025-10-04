@@ -1,6 +1,7 @@
 use crate::variation::{Variation, VariationMove, VariationTree};
 
 /// Formats variation trees into proper PGN notation
+#[allow(dead_code)]
 pub struct VariationFormatter {
     /// Current output buffer
     output: String,
@@ -12,6 +13,7 @@ pub struct VariationFormatter {
     need_move_number: bool,
 }
 
+#[allow(dead_code)]
 impl VariationFormatter {
     pub fn new() -> Self {
         Self {

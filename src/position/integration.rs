@@ -7,6 +7,7 @@ use crate::formats::sg4::{DecodedMove, MoveInterpretation};
 
 /// Convert our ScidMove to the existing DecodedMove format
 /// This allows seamless integration with existing display code
+#[allow(dead_code)]
 pub fn scid_move_to_decoded_move(scid_move: &ScidMove, raw_bytes: &[u8]) -> DecodedMove {
     // Generate algebraic notation (simplified for now)
     let _from_algebraic = scid_move.from.to_algebraic();
@@ -57,6 +58,7 @@ pub fn scid_move_to_decoded_move(scid_move: &ScidMove, raw_bytes: &[u8]) -> Deco
 
 /// Position-aware move decoder that integrates with existing game parsing
 /// This replaces the static try_decode_move function with position-aware decoding
+#[allow(dead_code)]
 pub fn decode_move_with_position(
     position: &ScidPosition,
     raw_byte: u8,
@@ -73,11 +75,13 @@ pub fn decode_move_with_position(
 }
 
 /// Back-compat shim used by tests: tracks a position and processes moves from bytes/streams
+#[allow(dead_code)]
 pub struct PositionTracker {
     position: ScidPosition,
     move_count: usize,
 }
 
+#[allow(dead_code)]
 impl PositionTracker {
     pub fn new() -> Self {
         Self {

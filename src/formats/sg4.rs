@@ -15,12 +15,14 @@ pub struct DecodedMove {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PgnTag {
     pub name: String,
     pub value: String,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct GameFlags {
     pub non_standard_start: bool,
     pub has_promotions: bool,
@@ -58,6 +60,7 @@ pub enum MoveInterpretation {
 }
 
 pub struct Sg4File {
+    #[allow(dead_code)]
     mmap: Mmap,
 }
 
@@ -69,13 +72,15 @@ impl Sg4File {
         Ok(Self { mmap })
     }
     
-    pub fn iter_games(&self) -> GameIterator {
+    #[allow(dead_code)]
+    pub fn iter_games(&self) -> GameIterator<'_> {
         GameIterator {
             sg4: self,
             current_offset: 0,
         }
     }
     
+    #[allow(dead_code)]
     pub fn get_game(&self, game_index: usize) -> Result<GameRecord> {
         let mut iterator = self.iter_games();
         
@@ -89,15 +94,18 @@ impl Sg4File {
     }
     
     /// Get the number of games in the SG4 file
+    #[allow(dead_code)]
     pub fn num_games(&self) -> usize {
         find_game_boundaries(&self.mmap).len()
     }
     
     /// Get the raw data for debugging
+    #[allow(dead_code)]
     pub fn data(&self) -> &[u8] {
         &self.mmap
     }
     
+    #[allow(dead_code)]
     fn decode_pawn_promotion(&self, move_value: u8) -> Option<String> {
         match move_value {
             8 => Some("Queen".to_string()),
@@ -110,11 +118,17 @@ impl Sg4File {
 }
 
 pub struct GameRecord {
+    #[allow(dead_code)]
     pub tags: Vec<PgnTag>,
+    #[allow(dead_code)]
     pub flags: GameFlags,
+    #[allow(dead_code)]
     pub moves: Vec<DecodedMove>,
+    #[allow(dead_code)]
     pub comments: Vec<String>,
+    #[allow(dead_code)]
     pub nags: Vec<u8>,
+    #[allow(dead_code)]
     pub result: Option<u8>,
     pub next_offset: usize,
 }
@@ -152,6 +166,7 @@ impl<'a> GameIterator<'a> {
         let mut moves = Vec::new();
         let mut comments = Vec::new();
         let mut nags = Vec::new();
+        #[allow(unused_assignments)]
         let mut result = None;
         let mut flags = GameFlags {
             non_standard_start: false,
@@ -161,7 +176,7 @@ impl<'a> GameIterator<'a> {
         };
         
         // Parse PGN tags first
-        let tags_end_offset = self.parse_pgn_tags(&mut current_offset, &mut tags, &mut flags)?;
+        let _tags_end_offset = self.parse_pgn_tags(&mut current_offset, &mut tags, &mut flags)?;
         
         // Then parse moves and special bytes
         loop {
@@ -227,8 +242,8 @@ impl<'a> GameIterator<'a> {
         })
     }
     
-    fn parse_pgn_tags(&self, offset: &mut usize, tags: &mut Vec<PgnTag>, flags: &mut GameFlags) -> Result<usize> {
-        let start_offset = *offset;
+    fn parse_pgn_tags(&self, offset: &mut usize, tags: &mut Vec<PgnTag>, _flags: &mut GameFlags) -> Result<usize> {
+        let _start_offset = *offset;
         
         while *offset < self.sg4.mmap.len() {
             let byte = self.sg4.mmap[*offset];
@@ -321,7 +336,7 @@ impl<'a> GameIterator<'a> {
         self.decode_single_byte_move(byte, piece_num, move_value, offset)
     }
     
-    fn decode_single_byte_move(&self, byte: u8, piece_num: u8, move_value: u8, offset: &mut usize) -> Result<DecodedMove> {
+    fn decode_single_byte_move(&self, byte: u8, piece_num: u8, move_value: u8, _offset: &mut usize) -> Result<DecodedMove> {
         let interpretation = match piece_num {
             1 => self.decode_king_move(move_value),
             2 => self.decode_queen_move(move_value),
@@ -346,7 +361,7 @@ impl<'a> GameIterator<'a> {
     }
     
     fn decode_king_move(&self, move_value: u8) -> MoveInterpretation {
-        let (direction_code, is_castle, description) = match move_value {
+        let (direction_code, is_castle, _description) = match move_value {
             0 => (0, false, "King up"),
             1 => (1, false, "King up-right"),
             2 => (2, false, "King right"),
@@ -367,7 +382,7 @@ impl<'a> GameIterator<'a> {
     }
     
     fn decode_queen_move(&self, move_value: u8) -> MoveInterpretation {
-        let description = match move_value {
+        let _description = match move_value {
             0 => "Queen up",
             1 => "Queen up-right",
             2 => "Queen right",
@@ -382,7 +397,7 @@ impl<'a> GameIterator<'a> {
         MoveInterpretation::Queen
     }
     
-    fn decode_queen_diagonal_move(&self, first_byte: u8, second_byte: u8, offset: &mut usize) -> Result<DecodedMove> {
+    fn decode_queen_diagonal_move(&self, first_byte: u8, second_byte: u8, _offset: &mut usize) -> Result<DecodedMove> {
         let piece_num = (first_byte >> 4) & 0x0F;
         let move_value = first_byte & 0x0F;
         let diagonal_info = second_byte & 0x0F;
@@ -401,7 +416,7 @@ impl<'a> GameIterator<'a> {
     }
     
     fn decode_rook_move(&self, move_value: u8) -> MoveInterpretation {
-        let (target_info, description) = if move_value >= 8 {
+        let (_target_info, _description) = if move_value >= 8 {
             let rank = move_value - 8;
             (format!("rank {}", rank + 1), format!("Rook to rank {}", rank + 1))
         } else {
@@ -423,7 +438,7 @@ impl<'a> GameIterator<'a> {
         };
         
         let target_file = ('a' as u8 + file) as char;
-        let description = format!("Bishop {} to file {}", direction, target_file);
+        let _description = format!("Bishop {} to file {}", direction, target_file);
         
         MoveInterpretation::Bishop
     }
@@ -439,7 +454,7 @@ impl<'a> GameIterator<'a> {
             move_value - 8
         };
         
-        let description = if l_shape_code < KNIGHT_MOVES.len() as u8 {
+        let _description = if l_shape_code < KNIGHT_MOVES.len() as u8 {
             format!("Knight L-shaped move pattern {}", l_shape_code + 1)
         } else {
             format!("Unknown knight move: {}", move_value)
@@ -451,7 +466,7 @@ impl<'a> GameIterator<'a> {
     }
     
     fn decode_pawn_move(&self, move_value: u8) -> MoveInterpretation {
-        let (direction, promotion, is_en_passant, description) = match move_value {
+        let (direction, promotion, is_en_passant, _description) = match move_value {
             0 => ("forward", None, None, "Pawn forward 1 square"),
             1 => ("capture-left", None, None, "Pawn capture left"),
             2 => ("capture-right", None, None, "Pawn capture right"),
@@ -487,6 +502,7 @@ const ENCODE_END_MARKER: u8 = 14;
 const ENCODE_END_GAME: u8 = 15;
 
 // Block size from SCID source code
+#[allow(dead_code)]
 const BLOCK_SIZE: usize = 131072;
 
 // Maximum tag length from SCID source code
@@ -517,11 +533,13 @@ const COMMON_TAGS: &[&str] = &[
 const ENCODE_FIRST: u8 = 11;
 const ENCODE_LAST: u8 = 15;
 
+#[allow(dead_code)]
 pub struct NagProcessor;
 
 impl NagProcessor {
     /// Process NAG (Numeric Annotation Glyph) values
     /// Based on SCID source code for annotation handling
+    #[allow(dead_code)]
     pub fn process_nag(nag_value: u8) -> Option<String> {
         // Standard NAG values from SCID source code
         match nag_value {
@@ -595,6 +613,7 @@ pub fn find_game_boundaries(data: &[u8]) -> Vec<(usize, usize)> {
 
 /// Parse PGN tags and game elements from SG4 data
 /// Legacy function for backward compatibility
+#[allow(dead_code)]
 pub fn parse_pgn_tags(data: &[u8]) -> Result<GameParseState> {
     let mut elements = Vec::new();
     let mut tags = Vec::new();
@@ -622,9 +641,9 @@ pub fn parse_pgn_tags(data: &[u8]) -> Result<GameParseState> {
                         result: data[current_offset + 1],
                         offset: current_offset,
                     });
-                    current_offset += 2;
+                    let _ = current_offset + 2;
                 } else {
-                    current_offset += 1;
+                    let _ = current_offset + 1;
                 }
                 break;
             }
@@ -689,41 +708,61 @@ pub fn parse_pgn_tags(data: &[u8]) -> Result<GameParseState> {
 
 /// Game element for legacy parsing
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum GameElement {
     Move {
+        #[allow(dead_code)]
         raw_byte: u8,
+        #[allow(dead_code)]
         piece_num: u8,
+        #[allow(dead_code)]
         move_value: u8,
+        #[allow(dead_code)]
         offset: usize,
     },
     Nag {
+        #[allow(dead_code)]
         nag_value: u8,
+        #[allow(dead_code)]
         offset: usize,
     },
     Comment {
+        #[allow(dead_code)]
         text: String,
+        #[allow(dead_code)]
         offset: usize,
     },
     VariationStart {
+        #[allow(dead_code)]
         offset: usize,
     },
     VariationEnd {
+        #[allow(dead_code)]
         offset: usize,
     },
     GameEnd {
+        #[allow(dead_code)]
         result: u8,
+        #[allow(dead_code)]
         offset: usize,
     },
 }
 
 /// Game parse state for legacy compatibility
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct GameParseState {
+    #[allow(dead_code)]
     pub tags: Vec<PgnTag>,
+    #[allow(dead_code)]
     pub flags: GameFlags,
+    #[allow(dead_code)]
     pub elements: Vec<GameElement>,
+    #[allow(dead_code)]
     pub tags_end_offset: usize,
+    #[allow(dead_code)]
     pub flags_offset: usize,
+    #[allow(dead_code)]
     pub moves_start_offset: usize,
 }
 
@@ -743,21 +782,22 @@ fn parse_simple_tag(data: &[u8], offset: &mut usize) -> Result<(String, String)>
 
 /// Parse PGN tags with streaming support for variable-length moves
 /// Enhanced version that supports the new streaming game elements
+#[allow(dead_code)]
 pub fn parse_pgn_tags_with_streaming(data: &[u8]) -> Result<Vec<StreamingGameElement>> {
     let mut elements = Vec::new();
     let mut current_offset = 0;
     
     while current_offset < data.len() {
         let byte = data[current_offset];
-        let start_offset = current_offset;
+        let _start_offset = current_offset;
         
         match byte {
             ENCODE_END_GAME => {
                 if current_offset + 1 < data.len() {
                     elements.push(StreamingGameElement::GameEnd { result: data[current_offset + 1] });
-                    current_offset += 2;
+                    let _ = current_offset + 2;
                 } else {
-                    current_offset += 1;
+                    let _ = current_offset + 1;
                 }
                 break;
             }
@@ -964,10 +1004,12 @@ mod tests {
 }
 
 impl NagProcessor {
+    #[allow(dead_code)]
     pub fn is_symbol_nag(nag: u8) -> bool {
         matches!(nag, 1..=6 | 10..=21)
     }
 
+    #[allow(dead_code)]
     pub fn nag_to_symbol(nag: u8) -> &'static str {
         match nag {
             1 => "!",   // Good move
@@ -988,6 +1030,7 @@ impl NagProcessor {
         }
     }
 
+    #[allow(dead_code)]
     pub fn nag_to_description(nag: u8) -> Option<&'static str> {
         match nag {
             1 => Some("Good move"),

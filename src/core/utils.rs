@@ -2,6 +2,7 @@ use std::io::Read;
 use crate::core::error::Result;
 
 /// Read a single byte from the reader
+#[allow(dead_code)]
 pub fn read_u8(reader: &mut impl Read) -> Result<u8> {
     let mut buf = [0u8; 1];
     reader.read_exact(&mut buf)?;
@@ -10,6 +11,7 @@ pub fn read_u8(reader: &mut impl Read) -> Result<u8> {
 
 /// Read a 2-byte big-endian unsigned integer (SCID format)
 /// Based on SCID's mfile.cpp:305-313 ReadTwoBytes() implementation
+#[allow(dead_code)]
 pub fn read_u16_be(reader: &mut impl Read) -> Result<u16> {
     let mut buf = [0u8; 2];
     reader.read_exact(&mut buf)?;
@@ -19,6 +21,7 @@ pub fn read_u16_be(reader: &mut impl Read) -> Result<u16> {
 
 /// Read a 3-byte big-endian unsigned integer (SCID format)
 /// Based on SCID's mfile.cpp:325-334 ReadThreeBytes() implementation
+#[allow(dead_code)]
 pub fn read_u24_be(reader: &mut impl Read) -> Result<u32> {
     let mut buf = [0u8; 3];
     reader.read_exact(&mut buf)?;
@@ -29,6 +32,7 @@ pub fn read_u24_be(reader: &mut impl Read) -> Result<u32> {
 
 /// Read a 4-byte big-endian unsigned integer (SCID format)
 /// Based on SCID's mfile.cpp:349-361 ReadFourBytes() implementation
+#[allow(dead_code)]
 pub fn read_u32_be(reader: &mut impl Read) -> Result<u32> {
     let mut buf = [0u8; 4];
     reader.read_exact(&mut buf)?;
@@ -37,6 +41,7 @@ pub fn read_u32_be(reader: &mut impl Read) -> Result<u32> {
 }
 
 /// Read a null-terminated string of fixed length
+#[allow(dead_code)]
 pub fn read_string(reader: &mut impl Read, len: usize) -> Result<String> {
     let mut buf = vec![0u8; len];
     reader.read_exact(&mut buf)?;

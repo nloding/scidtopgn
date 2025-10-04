@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 
 /// Memory-optimized position tracker for large games (ScidPosition-based)
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct ScidOptimizedPositionTracker {
     current_position: ScidPosition,
     // Only keep recent move history to save memory
@@ -15,6 +16,7 @@ pub struct ScidOptimizedPositionTracker {
     max_recent_moves: usize,
 }
 
+#[allow(dead_code)]
 impl ScidOptimizedPositionTracker {
     const DEFAULT_MAX_RECENT_MOVES: usize = 10;
 
@@ -187,12 +189,14 @@ impl ScidOptimizedPositionTracker {
 
 /// Memory pool for reusing ScidMove objects
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct MovePool {
     available_moves: Vec<ScidMove>,
     allocated_moves: usize,
     max_pool_size: usize,
 }
 
+#[allow(dead_code)]
 impl MovePool {
     const DEFAULT_MAX_POOL_SIZE: usize = 100;
 
@@ -253,16 +257,22 @@ impl MovePool {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct PoolStatistics {
+    #[allow(dead_code)]
     pub available_moves: usize,
+    #[allow(dead_code)]
     pub allocated_moves: usize,
+    #[allow(dead_code)]
     pub pool_capacity: usize,
+    #[allow(dead_code)]
     pub memory_usage_bytes: usize,
 }
 
 /// Compact position tracker with minimal memory footprint
 /// Trades some functionality for memory efficiency
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct CompactPositionTracker {
     // Only essential data
     move_count: u32,       // 32-bit counter (4 bytes vs 8 bytes for usize)
@@ -271,6 +281,7 @@ pub struct CompactPositionTracker {
     last_move_hash: u64,   // Hash of last move for validation
 }
 
+#[allow(dead_code)]
 impl CompactPositionTracker {
     pub fn new() -> Self {
         Self {
@@ -316,17 +327,25 @@ impl CompactPositionTracker {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct CompactStatistics {
+    #[allow(dead_code)]
     pub total_moves: usize,
+    #[allow(dead_code)]
     pub successful_moves: usize,
+    #[allow(dead_code)]
     pub success_rate: f64,
+    #[allow(dead_code)]
     pub position_hash: u64,
+    #[allow(dead_code)]
     pub memory_footprint: usize,
 }
 
 /// Memory usage analyzer for position tracking components
+#[allow(dead_code)]
 pub struct MemoryAnalyzer;
 
+#[allow(dead_code)]
 impl MemoryAnalyzer {
     pub fn analyze_position_memory() -> MemoryAnalysis {
         MemoryAnalysis {
@@ -403,28 +422,46 @@ impl MemoryAnalyzer {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct MemoryAnalysis {
+    #[allow(dead_code)]
     pub position_size: usize,
+    #[allow(dead_code)]
     pub move_size: usize,
+    #[allow(dead_code)]
     pub tracker_base_size: usize,
+    #[allow(dead_code)]
     pub compact_tracker_size: usize,
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct GameMemoryEstimate {
+    #[allow(dead_code)]
     pub move_count: usize,
+    #[allow(dead_code)]
     pub recent_moves_limit: usize,
+    #[allow(dead_code)]
     pub position_memory_bytes: usize,
+    #[allow(dead_code)]
     pub recent_moves_memory_bytes: usize,
+    #[allow(dead_code)]
     pub tracker_overhead_bytes: usize,
+    #[allow(dead_code)]
     pub total_bytes: usize,
+    #[allow(dead_code)]
     pub total_kb: usize,
+    #[allow(dead_code)]
     pub total_mb: usize,
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct OptimizationRecommendation {
+    #[allow(dead_code)]
     pub move_count: usize,
+    #[allow(dead_code)]
     pub memory_limit_mb: usize,
+    #[allow(dead_code)]
     pub recommendations: Vec<String>,
 }
