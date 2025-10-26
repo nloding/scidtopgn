@@ -156,11 +156,12 @@ impl Sn4File {
         *offset += 1;
         
         let prefix_length = if record_index > 0 {
-            data[*offset] as usize
+            let prefix = data[*offset] as usize;
+            *offset += 1;
+            prefix
         } else {
             0
         };
-        *offset += 1;
         
         if prefix_length > total_length {
             return Err(ScidError::invalid_format(
