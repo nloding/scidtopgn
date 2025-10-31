@@ -31,3 +31,4 @@ before-refactor/
 
 .docs/
 .claude/
+.shotgun/

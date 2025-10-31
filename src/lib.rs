@@ -85,7 +85,11 @@ pub mod api {
     // Re-export primary database and index structures
     pub use crate::formats::si4::GameIndex;
     pub use crate::formats::sn4::NameRecord;
-    pub use crate::formats::{ScidDatabase, ScidGame};
+    pub use crate::formats::sn4::NameType;
+    pub use crate::formats::{ScidDatabase, ScidGame, ScidHeaderInfo, ScidNameHeaderInfo, DatabaseFileType};
+    
+    // Re-export move types for public API
+    pub use crate::formats::{DecodedMove, MoveInterpretation};
 
     // Re-export key chess-related types
     pub use crate::bridge::{
@@ -116,6 +120,9 @@ pub use crate::cli::{Cli, Commands};
 pub use crate::formats::si4::GameIndex;
 pub use crate::formats::sn4::NameRecord;
 pub use crate::formats::ScidDatabase;
+
+// Re-export move types for direct access
+pub use crate::formats::{DecodedMove, MoveInterpretation};
 
 // Re-export position tracking for advanced users
 pub use crate::bridge::position_tracker::ScidPositionTracker;

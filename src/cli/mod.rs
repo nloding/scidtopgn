@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+pub mod table_display;
+
 #[derive(Parser)]
 #[command(
     author = "SCIDtoPGN Team",
@@ -77,7 +79,7 @@ pub enum Commands {
         detailed: bool,
     },
     
-    /// Validate the integrity of a SCID database
+    /// Validate integrity of a SCID database
     Validate {
         /// Base path of SCID database
         #[arg(required = true)]

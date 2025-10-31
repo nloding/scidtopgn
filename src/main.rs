@@ -6,20 +6,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     
     match cli.command {
-        Commands::Parse { database, output, .. } => {
-            println!("Parsing database: {}", database.display());
-            if let Some(output_path) = &output {
-                println!("Output file: {}", output_path.display());
-            }
+        Commands::Parse { database, output: _, max_games, start_game, .. } => {
+            use scidtopgn::cli::table_display;
+            use scidtopgn::api::NameType;
             
             // Open the SCID database
             let db = ScidDatabase::open(&database)?;
             
-            // Get basic info
-            let stats = db.statistics();
-            println!("Database contains {} games", stats.num_games);
+            // 1. Display SI4 header
+            table_display::display_si4_header(&db)?;
+            println!();
             
-            println!("Parse command not fully implemented yet");
+            // 2. Display SN4 header
+            table_display::display_sn4_header(&db)?;
+            println!();
+            
+            // 3. Display all names
+            table_display::display_names_table(&db, NameType::Player)?;
+            println!();
+            table_display::display_names_table(&db, NameType::Event)?;
+            println!();
+            table_display::display_names_table(&db, NameType::Site)?;
+            println!();
+            table_display::display_names_table(&db, NameType::Round)?;
+            println!();
+            
+            // 4. Display SG4 statistics
+            table_display::display_sg4_stats(&db)?;
+            println!();
+            
+            // 5. Display individual games
+            let num_games = db.num_games() as usize;
+            let limit = max_games.unwrap_or(num_games);
+            let end_game = std::cmp::min(start_game + limit, num_games);
+            
+            for game_num in start_game..end_game {
+                match table_display::display_game(&db, game_num as u32, true) {
+                    Ok(()) => {},
+                    Err(e) => eprintln!("Error displaying game {}: {}", game_num + 1, e),
+                }
+            }
+            
             Ok(())
         }
         Commands::Info { database, .. } => {

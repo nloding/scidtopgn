@@ -4,12 +4,49 @@ pub mod sg4;
 pub mod si4;
 pub mod sn4;
 
+// Re-export move-related types for public API
+pub use sg4::{DecodedMove, MoveInterpretation};
+
 use crate::core::error::Result;
 use crate::bridge::position::format_result;
 use crate::formats::sg4::Sg4File;
 use crate::formats::si4::Si4File;
 use crate::formats::sn4::Sn4File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Public representation of SI4 header data
+#[derive(Debug, Clone)]
+pub struct ScidHeaderInfo {
+    pub magic: String,
+    pub version: u16,
+    pub base_type: u32,
+    pub num_games: u32,
+    pub auto_load: u32,
+    pub description: String,
+}
+
+/// Public representation of SN4 header data
+#[derive(Debug, Clone)]
+pub struct ScidNameHeaderInfo {
+    pub magic: String,
+    pub timestamp: u32,
+    pub num_names_player: u32,
+    pub num_names_event: u32,
+    pub num_names_site: u32,
+    pub num_names_round: u32,
+    pub max_frequency_player: u32,
+    pub max_frequency_event: u32,
+    pub max_frequency_site: u32,
+    pub max_frequency_round: u32,
+}
+
+/// Enum for specifying which database file to query
+#[derive(Debug, Clone)]
+pub enum DatabaseFileType {
+    Si4,
+    Sn4,
+    Sg4,
+}
 
 /// Main SCID database structure that coordinates access to all SCID files
 /// 
@@ -25,6 +62,8 @@ pub struct ScidDatabase {
     sg4_file: Sg4File,
     /// Database validation state
     validated: bool,
+    /// Base path for reconstructing file paths
+    base_path: PathBuf,
 }
 
 /// Represents a complete game from the SCID database
@@ -44,7 +83,7 @@ impl ScidDatabase {
     /// This method will look for .si4, .sn4, and .sg4 files with the given base path.
     /// It validates that all required files exist and are properly formatted.
     pub fn open<P: AsRef<Path>>(base_path: P) -> Result<Self> {
-        let base_path = base_path.as_ref();
+        let base_path = base_path.as_ref().to_path_buf();
         
         // Open and validate all three SCID files
         let si4_file = Si4File::open(&base_path.with_extension("si4"))?;
@@ -56,6 +95,7 @@ impl ScidDatabase {
             sn4_file,
             sg4_file,
             validated: false,
+            base_path,
         };
         
         // Perform initial database validation
@@ -198,6 +238,65 @@ impl ScidDatabase {
             file_size_sg4: 0,
             is_validated: self.validated,
         }
+    }
+    
+    /// Get public SI4 header information
+    /// 
+    /// Returns a structured view of the SI4 header containing database metadata
+    /// like version, game count, description, etc.
+    pub fn si4_header(&self) -> ScidHeaderInfo {
+        let header = self.si4_file.header();
+        ScidHeaderInfo {
+            magic: String::from("Scid.si"),
+            version: header.version,
+            base_type: header.base_type,
+            num_games: header.num_games,
+            auto_load: header.auto_load,
+            description: header.description.clone(),
+        }
+    }
+    
+    /// Get public SN4 header information
+    /// 
+    /// Returns a structured view of the SN4 header containing name database
+    /// metadata like player counts, frequencies, timestamps, etc.
+    pub fn sn4_header(&self) -> ScidNameHeaderInfo {
+        let header = self.sn4_file.header();
+        ScidNameHeaderInfo {
+            magic: String::from("Scid.sn"),
+            timestamp: header.timestamp,
+            num_names_player: header.num_names_player,
+            num_names_event: header.num_names_event,
+            num_names_site: header.num_names_site,
+            num_names_round: header.num_names_round,
+            max_frequency_player: header.max_frequency_player,
+            max_frequency_event: header.max_frequency_event,
+            max_frequency_site: header.max_frequency_site,
+            max_frequency_round: header.max_frequency_round,
+        }
+    }
+    
+    /// Get file size for database files
+    /// 
+    /// Returns the actual file size in bytes for the specified database file type.
+    /// Uses std::fs::metadata() to get current file size from disk.
+    pub fn file_size(&self, file_type: DatabaseFileType) -> Result<usize> {
+        let file_path = match file_type {
+            DatabaseFileType::Si4 => self.base_path.with_extension("si4"),
+            DatabaseFileType::Sn4 => self.base_path.with_extension("sn4"),
+            DatabaseFileType::Sg4 => self.base_path.with_extension("sg4"),
+        };
+        
+        let metadata = std::fs::metadata(file_path)?;
+        Ok(metadata.len() as usize)
+    }
+    
+    /// Get an iterator over names of a specific type
+    /// 
+    /// Provides convenient access to player, event, site, and round names
+    /// from the SN4 names database.
+    pub fn iter_names(&self, name_type: crate::formats::sn4::NameType) -> crate::formats::sn4::NameIterator<'_> {
+        self.sn4_file.iter_names(name_type)
     }
 }
 
