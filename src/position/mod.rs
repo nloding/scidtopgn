@@ -2,12 +2,12 @@
 // POSITION-AWARE SCID MOVE DECODING - THE CORRECT APPROACH
 // ============================================================================
 //
-// This module implements position-aware move decoding that REPLACES the broken
+// This module implements position-aware move decoding that REPLACES broken
 // static interpretation approach that was previously used in sg4.rs.
 //
 // PROBLEM SOLVED:
 //   The CF byte (piece 12, value 15) was incorrectly decoded as "Pawn en_passant"
-//   by the static decoder, but correctly decodes to "e4" (pawn double push) when
+//   by static decoder, but correctly decodes to "e4" (pawn double push) when
 //   using position-aware decoding.
 //
 // MAJOR FEATURES IMPLEMENTED:
@@ -40,7 +40,7 @@
 //   - Integration layer: Bridges with existing sg4.rs parsing code
 //
 // SCID COMPLIANCE:
-//   All algorithms exactly match the official SCID source code:
+//   All algorithms exactly match official SCID source code:
 //   - scidvspc/src/game.cpp decodeMove() and decodeQueen() functions
 //   - scidvspc/src/position.cpp Position class
 //   - scidvspc/src/bytebuf.h ByteBuffer streaming functionality
@@ -62,7 +62,27 @@
 // Based on scidvspc/src/position.cpp Position class and game.cpp decoding
 // ============================================================================
 
+// Module declarations
+pub mod moves;
+pub mod move_converter;
+pub mod byte_stream;
+pub mod debug;
+pub mod decoder;
+pub mod integration;
+pub mod optimization;
+pub mod performance;
+pub mod state_manager;
+pub mod tests;
+
+// Re-export key functions and types
 pub use moves::{Color, PieceType, ScidMove, Square};
+pub use move_converter::PositionTracker;
+#[allow(unused_imports)]
+pub use decoder::{decode_move, decode_move_with_stream, decode_queen_with_stream};
+#[allow(unused_imports)]
+pub use state_manager::{PositionState, PositionStateManager};
+#[allow(unused_imports)]
+pub use byte_stream::ScidByteStream;
 
 /// SCID-compatible position tracker
 /// Based on scidvspc/src/position.cpp Position class
@@ -218,7 +238,7 @@ impl ScidPosition {
         // Store move in history
         self.move_history.push(scid_move.clone());
 
-        // Apply the move to board
+        // Apply move to board
         self.apply_move_to_board(scid_move)?;
 
         // Update piece lists
@@ -378,19 +398,7 @@ impl ScidPosition {
         Ok(())
     }
 
-    /// Check if a move is legal in current position
-    pub fn is_legal_move(&self, mv: &ScidMove) -> bool {
-        // Basic validation - piece exists and belongs to current player
-        if let Some(piece) = self.piece_at(mv.from) {
-            // For now, just check piece exists and matches
-            piece == mv.moving_piece
-        } else {
-            false
-        }
-    }
-
-    /// Check if a move would be legal in the current position
-    /// Phase 2 Step 2.2 from POSITION_TRACKING_IMPLEMENTATION_PLAN.md
+    /// Check if a move would be legal in current position
     pub fn is_move_legal(&self, scid_move: &ScidMove) -> bool {
         // Basic validation
         if scid_move.from.0 >= 64 || scid_move.to.0 >= 64 {
@@ -472,23 +480,3 @@ impl ScidPosition {
         hasher.finish()
     }
 }
-
-// Re-export types from moves module
-pub mod byte_stream;
-pub mod debug;
-pub mod decoder;
-pub mod integration;
-pub mod moves;
-pub mod optimization;
-pub mod performance;
-pub mod state_manager;
-pub mod tests;
-
-// Re-export key functions
-pub use byte_stream::ScidByteStream;
-#[allow(unused_imports)]
-pub use decoder::{decode_move, decode_move_with_stream, decode_queen_with_stream};
-#[cfg(test)]
-#[cfg(test)]
-#[allow(unused_imports)]
-pub use state_manager::{PositionState, PositionStateManager};

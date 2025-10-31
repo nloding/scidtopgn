@@ -82,7 +82,7 @@ impl ScidMove {
     /// Validate move is legal in given position
     pub fn is_legal(&self, position: &crate::position::ScidPosition) -> bool {
         // Basic validation for now
-        position.is_legal_move(self)
+        position.is_move_legal(self)
     }
 }
 

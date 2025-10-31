@@ -101,6 +101,9 @@ pub mod api {
 
     // Re-export position tracking types
     pub use crate::bridge::position_tracker::ScidPositionTracker;
+    
+    // Re-export the new PositionTracker for move conversion
+    pub use crate::position::PositionTracker;
 
     // Re-export PGN header management
     pub use crate::pgn::PgnHeader;
