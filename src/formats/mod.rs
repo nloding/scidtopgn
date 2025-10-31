@@ -75,6 +75,8 @@ pub struct ScidGame {
     pub game_state: crate::bridge::GameState,
     /// Parsed game elements (moves, comments, variations)
     pub parsed_game: crate::formats::sg4::StreamingGameParseState,
+    /// Decoded moves from the SG4 file
+    pub moves: Vec<DecodedMove>,
 }
 
 impl ScidDatabase {
@@ -142,8 +144,17 @@ impl ScidDatabase {
         // Get game index from si4 file
         let game_index = self.si4_file.get_game(index)?;
         
-        // TODO: Parse game data from sg4 file when methods are available
-        // For now, create empty parsed game
+        // Try to get moves from SG4 file, but don't fail if unavailable
+        // Try to get moves from SG4 file, but don't fail if unavailable
+        let moves = match self.sg4_file.get_game(index as usize) {
+            Ok(game_record) => game_record.moves,
+            Err(e) => {
+                eprintln!("Warning: Could not load moves for game {}: {}", index, e);
+                Vec::new()
+            }
+        };
+        
+        // Create empty parsed game for now
         let parsed_game = crate::formats::sg4::StreamingGameParseState::new();
         
         // Create game state with metadata
@@ -183,6 +194,7 @@ impl ScidDatabase {
             index: game_index,
             game_state,
             parsed_game,
+            moves,
         })
     }
     
