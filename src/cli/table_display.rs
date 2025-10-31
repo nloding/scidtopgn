@@ -119,10 +119,76 @@ pub fn display_sg4_stats(db: &ScidDatabase) -> Result<()> {
     Ok(())
 }
 
-/// Display placeholder for game moves (to be implemented if decoder is available)
-fn display_game_moves(_db: &ScidDatabase, _game_index: u32) -> Result<()> {
-    println!("Move display not yet implemented - verify move decoder is available");
+/// Display game moves with algebraic notation
+/// 
+/// Converts SCID moves to standard algebraic chess notation using PositionTracker
+/// and displays them in a formatted PGN-style sequence.
+fn display_game_moves(db: &ScidDatabase, game_index: u32) -> Result<()> {
+    use crate::position::PositionTracker;
+    
+    let game = db.get_game(game_index)?;
+    
+    if game.moves.is_empty() {
+        println!("  📋 Moves: [No moves available]");
+        return Ok(());
+    }
+    
+    let mut tracker = PositionTracker::new();
+    let mut notations = Vec::new();
+    let mut error_count = 0;
+    
+    for (i, decoded_move) in game.moves.iter().enumerate() {
+        match tracker.apply_move(decoded_move) {
+            Ok(notation) => notations.push(notation),
+            Err(e) => {
+                eprintln!("    ⚠️  Error decoding move {}: {}", i + 1, e);
+                error_count += 1;
+            }
+        }
+    }
+    
+    let moves_pgn = format_moves_as_pgn(&notations);
+    println!("  📋 Moves ({}): {}", notations.len(), moves_pgn);
+    
+    if error_count > 0 {
+        eprintln!("    ⚠️  {} move(s) failed to decode", error_count);
+    }
+    
     Ok(())
+}
+
+/// Format move notations as PGN-style text
+/// 
+/// Takes a vector of algebraic move notations and formats them
+/// in standard PGN game notation with move numbers.
+pub fn format_moves_as_pgn(notations: &[String]) -> String {
+    if notations.is_empty() {
+        return "[No moves]".to_string();
+    }
+    
+    let mut result = String::new();
+    let mut move_num = 1;
+    
+    // Process moves in pairs (white + black)
+    for chunk in notations.chunks(2) {
+        if !result.is_empty() {
+            result.push(' ');
+        }
+        
+        match chunk {
+            [white_move] => {
+                result.push_str(&format!("{}. {}", move_num, white_move));
+                move_num += 1;
+            }
+            [white_move, black_move] => {
+                result.push_str(&format!("{}. {} {}", move_num, white_move, black_move));
+                move_num += 1;
+            }
+            _ => {} // Shouldn't happen with chunks(2)
+        }
+    }
+    
+    result.trim().to_string()
 }
 
 /// Display individual game information with metadata
