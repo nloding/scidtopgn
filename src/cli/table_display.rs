@@ -121,10 +121,43 @@ pub fn display_sg4_stats(db: &ScidDatabase) -> Result<()> {
 
 /// Display game moves with algebraic notation
 /// 
-/// Converts SCID moves to standard algebraic chess notation using PositionTracker
-/// and displays them in a formatted PGN-style sequence.
+/// This function converts SCID binary moves to standard algebraic chess notation
+/// and displays them in a PGN-style format. It uses the position-aware
+/// decoder from `src/position/` for accurate move conversion, replacing the
+/// broken static interpretation system.
+/// 
+/// # Multi-byte vs Single-byte Moves
+/// 
+/// - **Single-byte moves**: Reconstructed from piece_num and move_value, decoded
+///   using `decode_move()`
+/// - **Multi-byte moves**: Used for queen diagonal moves and other complex
+///   moves, decoded using `decode_move_with_stream()` with the raw bytes
+/// 
+/// # Error Handling
+/// 
+/// The function is resilient to individual move failures:
+/// - Logs decode errors but continues processing remaining moves
+/// - Tracks and reports total error count at the end
+/// - Displays partial game results even with some failed moves
+/// 
+/// # Arguments
+/// 
+/// * `db` - The SCID database containing the game
+/// * `game_index` - Index of the game to display (0-based)
+/// 
+/// # Returns
+/// 
+/// * `Ok(())` - Successfully displayed moves (may have partial errors)
+/// * `Err(ScidError)` - Failed to load game data
+/// 
+/// # Example
+/// 
+/// ```rust
+/// display_game_moves(&database, 0)?; // Display first game's moves
+/// // Output: "📋 Moves (44): 1. Qxg1 Qxg2 2. Kxd2 Bh6 ..."
+/// ```
 fn display_game_moves(db: &ScidDatabase, game_index: u32) -> Result<()> {
-    use crate::position::PositionTracker;
+    use crate::position::{ScidPosition, decode_move, decode_move_with_stream, ScidByteStream};
     
     let game = db.get_game(game_index)?;
     
@@ -133,17 +166,44 @@ fn display_game_moves(db: &ScidDatabase, game_index: u32) -> Result<()> {
         return Ok(());
     }
     
-    let mut tracker = PositionTracker::new();
+    let mut position = ScidPosition::new_starting_position();
     let mut notations = Vec::new();
     let mut error_count = 0;
     
     for (i, decoded_move) in game.moves.iter().enumerate() {
-        match tracker.apply_move(decoded_move) {
-            Ok(notation) => notations.push(notation),
-            Err(e) => {
-                eprintln!("    ⚠️  Error decoding move {}: {}", i + 1, e);
-                error_count += 1;
+        let scid_move = if decoded_move.raw_bytes.len() > 1 {
+            // Multi-byte move: use stream-based decoder (for queen diagonals, etc.)
+            let mut stream = ScidByteStream::new(&decoded_move.raw_bytes);
+            match decode_move_with_stream(&position, &mut stream) {
+                Ok(mv) => mv,
+                Err(e) => {
+                    eprintln!("    ⚠️  Error decoding multi-byte move {}: {}", i + 1, e);
+                    error_count += 1;
+                    continue;
+                }
             }
+        } else {
+            // Single-byte move: reconstruct move byte and decode
+            let move_byte = (decoded_move.piece_num << 4) | decoded_move.move_value;
+            match decode_move(&position, move_byte) {
+                Ok(mv) => mv,
+                Err(e) => {
+                    eprintln!("    ⚠️  Error decoding move {}: {}", i + 1, e);
+                    error_count += 1;
+                    continue;
+                }
+            }
+        };
+        
+        // Convert to algebraic notation using current position
+        let notation = scid_move.to_algebraic(&position);
+        notations.push(notation);
+        
+        // Apply move to update position for next move
+        if let Err(e) = position.do_move(&scid_move) {
+            eprintln!("    ⚠️  Error applying move {}: {}", i + 1, e);
+            error_count += 1;
+            // Continue with next move using best effort position
         }
     }
     
@@ -151,7 +211,7 @@ fn display_game_moves(db: &ScidDatabase, game_index: u32) -> Result<()> {
     println!("  📋 Moves ({}): {}", notations.len(), moves_pgn);
     
     if error_count > 0 {
-        eprintln!("    ⚠️  {} move(s) failed to decode", error_count);
+        eprintln!("    ⚠️  {} move(s) failed to decode or apply", error_count);
     }
     
     Ok(())
@@ -161,6 +221,26 @@ fn display_game_moves(db: &ScidDatabase, game_index: u32) -> Result<()> {
 /// 
 /// Takes a vector of algebraic move notations and formats them
 /// in standard PGN game notation with move numbers.
+/// 
+/// # PGN Format
+/// 
+/// Moves are grouped in pairs (white + black) with move numbers:
+/// `1. e4 e5 2. Nf3 Nc6 3. Bb5 ...`
+/// 
+/// # Arguments
+/// 
+/// * `notations` - Vector of algebraic move notations (e.g., ["e4", "e5"])
+/// 
+/// # Returns
+/// 
+/// Formatted string in PGN notation. Returns "[No moves]" if input is empty.
+/// 
+/// # Example
+/// 
+/// ```rust
+/// let moves = vec!["e4", "e5", "Nf3", "Nc6"];
+/// assert_eq!(format_moves_as_pgn(&moves), "1. e4 e5 2. Nf3 Nc6");
+/// ```
 pub fn format_moves_as_pgn(notations: &[String]) -> String {
     if notations.is_empty() {
         return "[No moves]".to_string();
