@@ -114,20 +114,13 @@ fn test_complete_game_parsing() {
 
     match parse_pgn_tags_with_streaming(&test_game_data) {
         Ok(parse_result) => {
-            let stats = &parse_result.position_tracker_stats;
-            println!("Complete game parsing test:");
-            println!("  Total moves: {}", stats.total_moves);
-            println!("  Successful moves: {}", stats.successful_moves);
-            println!("  Failed moves: {}", stats.failed_moves);
-            println!("  Success rate: {:.1}%", stats.success_rate);
-            println!("  Position hash: {:016x}", stats.position_hash);
-            println!("  Current turn: {:?}", stats.current_turn);
+            let total_moves = parse_result
+                .iter()
+                .filter(|e| matches!(e, scidtopgn::sg4::StreamingGameElement::Move { .. }))
+                .count();
+            assert!(total_moves > 0, "Should process at least some moves");
 
-            // Validate that we processed some moves
-            assert!(stats.total_moves > 0, "Should process at least some moves");
-
-            // Test PGN generation
-            let pgn = generate_test_pgn_from_parsed_game(&parse_result);
+            let pgn = generate_test_pgn_from_parsed_game(&scidtopgn::sg4::StreamingGameParseState { elements: parse_result.clone() });
             assert!(pgn.contains("["), "PGN should contain headers");
             println!(
                 "Generated PGN excerpt: {}",
@@ -136,7 +129,6 @@ fn test_complete_game_parsing() {
         }
         Err(e) => {
             println!("Failed to parse test game: {}", e);
-            // Don't fail the test - this tests error handling
         }
     }
 }
@@ -246,16 +238,14 @@ fn generate_test_pgn_from_parsed_game(
 
     for element in &parse_result.elements {
         match element {
-            scidtopgn::sg4::StreamingGameElement::Move { raw_bytes, .. } => {
+            scidtopgn::sg4::StreamingGameElement::Move { raw, .. } => {
                 if is_white_move {
                     pgn.push_str(&format!("{}.", move_count));
                 }
-                // Decode move bytes against current position and render SAN
-                let mut stream = ScidByteStream::new(raw_bytes);
+                let mut stream = ScidByteStream::new(raw);
                 match decode_move_with_stream(&position, &mut stream) {
                     Ok(scid_move) => {
                         let san = scid_move.to_algebraic(&position);
-                        // Apply to advance position for next move
                         let _ = position.do_move(&scid_move);
                         pgn.push_str(&san);
                     }

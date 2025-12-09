@@ -532,6 +532,413 @@ Each game record has variable length and contains:
 └─────────────────┴──────────────────────────────────────────┘
 ```
 
+### Multiple Games Per SG4 File
+
+**CRITICAL**: SCID SG4 files can contain **multiple games** in a single file, not just single games.
+
+#### Game Organization in SG4 File
+
+**From SCID source `GFile::ReadGame()` and `IndexEntry` (gfile.h, lines 250-270):**
+```cpp
+errorT GFile::ReadGame (ByteBuffer * bb, uint offset, uint length)
+{
+    // Reads specific game at offset with length from SG4 file
+    bb->ProvideExternal (&(CurrentBlock->data[offset % GF_BLOCKSIZE]), length);
+    return OK;
+}
+```
+
+**From SCID source processing loops (multiple locations):**
+```cpp
+// Loop through all games in database (from sc_game.cpp, lines 1000+)
+for (uint i=0; i < db->numGames; i++) {
+    IndexEntry * ie = db->idx->FetchEntry(i);  // Get game 1, 2, 3...
+    
+    // Read only this specific game
+    db->gfile->ReadGame (db->bbuf, ie->GetOffset(), ie->GetLength());
+    
+    // Decode only this specific game
+    g->Decode (db->bbuf, GAME_DECODE_ALL);
+}
+```
+
+#### Game Boundary Detection
+
+**Multiple games are separated by:**
+```
+[Game 1 Data][NULL][NULL][Game 2 Data][NULL][NULL][Game 3 Data]...
+```
+
+**Example: five.sg4 with 5 games:**
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Game 1 (bytes 0-125)                                   │
+│ ┌─ PGN Tags (0-125) ─┐                              │
+│ └─ NULL terminator (126) ── NULL (127)                │
+│ ┌─ Game Flags (128)      │                              │
+│ └─ Move Data (129+)      │                              │
+├─────────────────────────────────────────────────────────────┤
+│ Game 2 (bytes 127-251)                                 │
+│ ┌─ PGN Tags (127-250) ──┐                              │
+│ └─ NULL terminator (251) ── NULL (252)                │
+│ ┌─ Game Flags (253)      │                              │
+│ └─ Move Data (254+)      │                              │
+├─────────────────────────────────────────────────────────────┤
+│ Game 3 (bytes 252-445)                                 │
+│ ... and so on...                                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key Pattern**: Each game ends with **2 consecutive null bytes (0x00, 0x00)**
+
+#### SCID's Multi-Game Reading Strategy
+
+**From SCID source (multiple locations like sc_game.cpp):**
+```cpp
+// Process each game individually using index entries
+for (uint gnum = start; gnum < end; gnum++) {
+    IndexEntry * ie = db->idx->FetchEntry(gnum);
+    
+    // 1. Empty buffer for this specific game
+    db->bbuf->Empty();
+    
+    // 2. Read only this game's data
+    db->gfile->ReadGame (db->bbuf, ie->GetOffset(), ie->GetLength());
+    
+    // 3. Reset buffer position to start
+    db->bbuf->BackToStart();
+    
+    // 4. Decode this specific game
+    g->Decode (db->bbuf, GAME_DECODE_ALL);
+    
+    // 5. Process this game individually
+    process_game(g);
+}
+```
+
+#### Common Implementation Error
+
+**WRONG**: Treating entire SG4 file as single game
+```rust
+// ❌ INCORRECT - treats file as one large game
+let mut offset = 0;
+loop {
+    let byte = self.sg4.mmap[offset];
+    if byte >= ENCODE_FIRST && byte <= ENCODE_LAST {
+        break;  // Wrong: finds annotation in game 1, not game boundary!
+    }
+    offset += 1;
+}
+```
+
+**CORRECT**: Parse individual games using game boundaries
+```rust
+// ✅ CORRECT SCID approach
+struct GameRecord {
+    offset: u32,    // Start position in SG4 file
+    length: u32,    // Length of game data
+}
+
+impl SG4Parser {
+    fn parse_multi_game_file(&mut self) -> Result<Vec<Game>, Error> {
+        let mut games = Vec::new();
+        
+        // Detect game boundaries (double null terminators)
+        let mut boundaries = self.detect_game_boundaries()?;
+        
+        // Parse each game separately
+        for boundary in boundaries {
+            let game = self.parse_single_game(boundary.start, boundary.length)?;
+            games.push(game);
+        }
+        
+        Ok(games)
+    }
+    
+    fn detect_game_boundaries(&self) -> Result<Vec<GameBoundary>, Error> {
+        // Look for patterns: [data][NULL][NULL][data][NULL][NULL]...
+        let mut boundaries = Vec::new();
+        let mut game_start = 0;
+        let mut prev_null = false;
+        
+        for (i, &byte) in self.sg4.mmap.iter().enumerate() {
+            if byte == 0x00 {
+                if prev_null {
+                    // Found double null = game boundary
+                    boundaries.push(GameBoundary {
+                        start: game_start,
+                        end: i - 1,  // Before first null
+                        length: (i - 1) - game_start,
+                    });
+                    game_start = i + 1;  // After second null
+                    prev_null = false;
+                } else {
+                    prev_null = true;  // First null
+                }
+            } else {
+                prev_null = false;
+            }
+        }
+        
+        Ok(boundaries)
+    }
+}
+```
+
+#### Real-World Examples
+
+**one.sg4 (1 game):**
+```
+Bytes 0-60: PGN tags
+Byte 61:    NULL terminator  
+Bytes 62+:  Single game data
+```
+
+**five.sg4 (5 games):**
+```
+Game 1: bytes 0-125, nulls at 126-127, moves 128+
+Game 2: bytes 127-251, nulls at 252-253, moves 254+
+Game 3: bytes 252-445, nulls at 446-447, moves 448+
+Game 4: bytes 446-602, nulls at 603-604, moves 605+
+Game 5: bytes 602-810, nulls at 809-810, moves 811+
+```
+
+#### Index File Coordination
+
+**SCID uses separate .si3 index file to track game locations:**
+```cpp
+// From SCID index file handling
+struct IndexEntry {
+    uint offset;    // Offset to game in .sg4 file
+    uint length;    // Length of game data
+};
+
+// Usage in database processing
+for (uint gnum = 0; gnum < db->numGames; gnum++) {
+    IndexEntry * ie = db->idx->FetchEntry(gnum);
+    // Use index to find and read each game
+    db->gfile->ReadGame(db->bbuf, ie->GetOffset(), ie->GetLength());
+    // ... process this game
+}
+```
+
+**Without index file**: Use double-null detection to find game boundaries.
+
+### Tag Parsing and Game Structure
+
+**CRITICAL IMPLEMENTATION NOTE**: The transition from PGN tags to moves is NOT detected by bytes 11-15, but by structured tag parsing with null byte termination.
+
+#### Tag Section End Detection
+
+**From SCID source `skipTags()` function (game.cpp, lines 1650-1680):**
+```cpp
+static errorT skipTags(ByteBuffer * buf)
+{
+    byte b;
+    b = buf->GetByte();
+    while (b != 0  && buf->Status() == OK) {
+        if (b == 255) {
+            // Special 3-byte binary encoding of EventDate:
+            buf->Skip(3);
+        } else if (b > MAX_TAG_LEN) {
+            // Common tag name, encoded as single byte:
+            char * ctag = (char *) commonTags[b - MAX_TAG_LEN - 1];
+            b = buf->GetByte();
+            buf->GetFixedString(value, b);
+        } else {
+            // Regular tag: [name_length][name][value_length][value]
+            buf->GetFixedString(tag, b);
+            b = buf->GetByte();
+            buf->GetFixedString(value, b);
+        }
+        b = buf->GetByte();
+    }
+    return buf->Status();
+}
+```
+
+**Key Insight**: Tags end when byte `0` (null terminator) is encountered, NOT when bytes 11-15 are found.
+
+#### Game Record Parsing Sequence
+
+**From SCID source `Game::DecodeStart()` function (game.cpp, lines 2800-2850):**
+```cpp
+errorT Game::DecodeStart (ByteBuffer * buf)
+{
+    // First, tags are skipped for speed:
+    err = skipTags(buf);
+    if (err != OK) { return err; }
+    
+    // Now read the game flags:
+    byte flags = buf->GetByte();
+    if (flags & 1) { NonStandardStart = true; }
+    if (flags & 2) { PromotionsFlag = true; }
+    if (flags & 4) { UnderPromosFlag = true; }
+    
+    // Now decode the startBoard, if there is one.
+    if (NonStandardStart) {
+        char * tempStr;
+        buf->GetTerminatedString (&tempStr);
+        if ((err = buf->Status()) != OK) {
+            NonStandardStart = 0;
+            return err;
+        }
+        if (!StartPos) { StartPos = new Position; }
+        err = StartPos->ReadFromFEN (tempStr);
+        if (err != OK) {
+            NonStandardStart = 0;
+            return err;
+        }
+        CurrentPos->CopyFrom (StartPos);
+    }
+    return err;
+}
+```
+
+**CRITICAL**: SCID uses structured parsing, NOT byte-range detection.
+
+#### Tag Encoding Rules
+
+**Common tags** (240+ tag_id):
+```
+[241][length][value]  // WhiteTitle
+[242][length][value]  // BlackTitle
+[243][length][value]  // Annotator
+...
+```
+
+**Regular tags**:
+```
+[name_length][name][value_length][value]
+```
+
+**Special EventDate**:
+```
+[255][3-byte-date]
+```
+
+**Tags end with**: `0` (null terminator)
+
+**After tags**:
+- **Game flags**: 1 byte
+- **Optional start position**: FEN string if non-standard start
+- **Moves**: Starting at next byte
+
+#### Common Implementation Error
+
+**WRONG**: Using bytes 11-15 as tag/move boundary markers:
+```rust
+// ❌ INCORRECT APPROACH
+if byte >= ENCODE_FIRST && byte <= ENCODE_LAST {
+    break;  // Assumes ANY byte 11-15 ends tags
+}
+```
+
+**CORRECT**: Parse tags until null terminator, then read flags:
+```rust
+// ✅ CORRECT SCID APPROACH
+let tags_end = skip_tags_until_null(buf)?;
+let game_flags = buf.read_byte()?;
+// Now start parsing moves from this position
+```
+
+#### Why This Matters
+
+**Real example from one.sg4**:
+```
+Offset 61: 0x6F (Pawn, move_value=15) <- FIRST MOVE (move_value=15: pawn double forward)
+...
+Offset 84: 0x0B (ENCODE_NAG) <- Annotation byte later in game
+```
+
+**Clarification: First Move Context**
+```
+Byte: 0x6F
+Decoding: piece_num=6 (Pawn), move_value=15 (double forward)
+Move: Pawn double forward from starting square
+Result: Could be 1.e4, 1.d4, 1.c4, etc.
+Context: Depends on which pawn and starting position
+Truth: move_value=15 means "double forward" for ANY pawn
+```
+
+**What happens with wrong approach**:
+1. Parser processes bytes 0-83 as "tag data" (incorrectly)
+2. Hits byte 0x0B at offset 84 (ENCODE_NAG = 11)
+3. Since `0x0B >= ENCODE_FIRST(11) && 0x0B <= ENCODE_LAST(15)`, assumes this is end of tags
+4. **WRONG**: `0x0B` is just an annotation byte, not tag section boundary
+5. Starts move parsing at offset 85, missing real first move at offset 61
+
+#### Special Byte Contexts
+
+**Bytes 11-15 have different meanings in different contexts**:
+
+| Context | Byte 11 (0x0B) | Byte 12 (0x0C) | Byte 13-15 |
+|----------|-------------------|-------------------|-------------|
+| Tag data | Can appear in string values | Can appear in string values | Can appear in string values |
+| Move data | ENCODE_NAG (annotation) | ENCODE_COMMENT (comment) | Variation markers, end game |
+| Game flags | Can be flag bits | Can be flag bits | Can be flag bits |
+
+**Therefore**: Bytes 11-15 must be interpreted based on parsing context, not as universal boundary markers.
+
+#### Implementation Requirements
+
+**Required Functions (based on SCID source):**
+
+```rust
+/// Skip PGN tags until null terminator (byte 0)
+/// Replicates SCID's skipTags() function exactly
+fn skip_tags(buf: &mut ByteBuffer) -> Result<(), Error> {
+    loop {
+        let byte = buf.get_byte()?;
+        if byte == 0 {
+            break; // Tags end with null terminator
+        }
+        
+        if byte == 255 {
+            // Special 3-byte EventDate encoding
+            buf.skip_bytes(3)?;
+        } else if byte > MAX_TAG_LEN {
+            // Common tag (single byte name)
+            parse_common_tag(buf, byte)?;
+        } else {
+            // Regular tag (variable length name/value)
+            parse_regular_tag(buf, byte)?;
+        }
+    }
+    Ok(())
+}
+
+/// Parse game with correct tag/move boundary detection
+fn parse_game_with_correct_logic(buf: &mut ByteBuffer) -> Result<Game, Error> {
+    // Step 1: Skip tags until null terminator (byte 0)
+    skip_tags(buf)?;
+    
+    // Step 2: Read game flags byte
+    let game_flags = buf.read_byte()?;
+    
+    // Step 3: Handle non-standard start if flag set
+    if game_flags & 0x01 != 0 {
+        let fen_string = buf.read_null_terminated_string()?;
+        setup_position_from_fen(fen_string)?;
+    }
+    
+    // Step 4: Parse moves from here
+    parse_moves(buf)
+}
+```
+
+**Constants (from SCID source):**
+```rust
+const MAX_TAG_LEN: u8 = 240;
+const ENCODE_NAG: u8 = 11;          // 0x0B
+const ENCODE_COMMENT: u8 = 12;        // 0x0C
+const ENCODE_START_MARKER: u8 = 13;    // 0x0D
+const ENCODE_END_MARKER: u8 = 14;      // 0x0E
+const ENCODE_END_GAME: u8 = 15;        // 0x0F
+```
+
+This implementation correctly finds first move at offset 61 (`0x6F` = pawn e2-e4) instead of mistakenly starting at offset 84.
+
 ### Game Data Elements
 
 #### Move Encoding (Piece-Specific Binary Format)
@@ -623,21 +1030,21 @@ ENCODE_END_GAME = 15        // Marks end of game data
 SCID supports complex nested variations:
 
 ```
-Main Line: 1.e4 e5 2.Nf3 Nc6 3.Bb5 a6
-              ├─ 2...Nf6 3.Nxe5 (Variation 1)
-              │     └─ 3...d6 4.Nf3 (Sub-variation)
-              └─ 3.Bc4 f5 (Variation 2)
+Main Line: {First Move} {Response Move} {Continuation Moves}
+              ├─ {Response Variation} {Response Continuation} (Variation 1)
+              │     └─ {Sub-variation Move} {Sub-continuation} (Sub-variation)
+              └─ {Alternative Move} {Alternative Continuation} (Variation 2)
 ```
 
 **Binary Representation**:
 ```
-Move(1.e4) Move(1...e5) Move(2.Nf3) 
-START_MARKER(13) Move(2...Nf6) Move(3.Nxe5) 
-    START_MARKER(13) Move(3...d6) Move(4.Nf3) END_MARKER(14)
+Move({First Notation}) Move({Response Notation}) Move({Continuation Notation}) 
+START_MARKER(13) Move({Response Variation}) Move({Response Continuation}) 
+    START_MARKER(13) Move({Sub-variation Move}) Move({Sub-continuation}) END_MARKER(14)
 END_MARKER(14)
-Move(2...Nc6) Move(3.Bb5)
-START_MARKER(13) Move(3.Bc4) Move(3...f5) END_MARKER(14)
-Move(3...a6) END_GAME(15)
+Move({Alternative Move}) Move({Alternative Notation})
+START_MARKER(13) Move({Alternative Variation}) Move({Alternative Continuation}) END_MARKER(14)
+Move({Final Move}) END_GAME(15)
 ```
 
 #### Comment and NAG Integration
@@ -646,6 +1053,24 @@ Move(3...a6) END_GAME(15)
 ```
 ENCODE_COMMENT(12) "Excellent move by Carlsen!\0"
 ```
+
+### Important: Opening Diversity
+
+**CRITICAL**: Do NOT assume games start with `1.e4`. Real chess databases contain diverse openings:
+
+| Opening Type | Common First Moves | Example Notation |
+|---------------|-------------------|-----------------|
+| King's Pawn | `1.e4`, `1.e3` | King's Pawn Opening |
+| Queen's Pawn | `1.d4`, `1.d3` | Queen's Pawn Opening |
+| English | `1.c4`, `1.c3` | English Opening |
+| Réti | `1.Nf3` | Réti Opening |
+| French | `1.e6` (as response) | French Defense |
+
+**Implementation Note**: 
+- First move byte `0x6F` = pawn double forward
+- This could be ANY pawn double forward: `e2-e4`, `d2-d4`, `c2-c4`, etc.
+- Context (starting position + board state) determines actual move
+- **Never hardcode "1.e4" as universal truth**
 
 **NAG Values** (Numeric Annotation Glyphs):
 ```

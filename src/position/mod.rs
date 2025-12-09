@@ -73,12 +73,16 @@ pub mod optimization;
 pub mod performance;
 pub mod state_manager;
 pub mod tests;
+// Phase 4.1: Unified piece system to eliminate dual numbering conflicts
+pub mod unified_piece;
 
 // Re-export key functions and types
 pub use moves::{Color, PieceType, ScidMove, Square};
 pub use move_converter::PositionTracker;
-#[allow(unused_imports)]
-pub use decoder::{decode_move, decode_move_with_stream, decode_queen_with_stream};
+pub use decoder::{decode_move, decode_move_with_piece_type, decode_move_with_stream};
+
+#[cfg(test)]
+mod decoder_tests;
 #[allow(unused_imports)]
 pub use state_manager::{PositionState, PositionStateManager};
 #[allow(unused_imports)]
@@ -372,6 +376,9 @@ impl ScidPosition {
             }
         }
 
+        eprintln!("DEBUG: mod.rs remove_captured_piece - captured_piece={:?}, target={}", 
+                  scid_move.captured_piece, scid_move.to.to_algebraic());
+        
         Err(format!(
             "Could not find captured piece at {}",
             scid_move.to.to_algebraic()

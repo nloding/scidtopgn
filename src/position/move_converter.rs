@@ -1,4 +1,6 @@
-use shakmaty::{Chess, Position};
+use shakmaty::{Chess, Position, EnPassantMode};
+use shakmaty::fen::Fen;
+use shakmaty::Role;
 use crate::formats::DecodedMove;
 use crate::core::error::{Result, ScidError};
 use crate::bridge::moves::ScidToShakmaty;
@@ -108,7 +110,7 @@ mod tests {
         
         assert_eq!(tracker.move_count(), 0);
         // Position should be at starting position
-        let fen = tracker.position().to_string();
+        let fen = Fen::from_position(tracker.position().clone(), EnPassantMode::Legal).to_string();
         assert!(fen.contains("rnbqkbnr")); // White pieces
         assert!(fen.contains("RNBQKBNR")); // Black pieces
     }
@@ -138,7 +140,7 @@ mod tests {
         let position = tracker.position();
         
         // Should be able to access the position
-        let fen = position.to_string();
+        let fen = Fen::from_position(position.clone(), EnPassantMode::Legal).to_string();
         assert!(!fen.is_empty());
     }
     
@@ -157,6 +159,7 @@ mod tests {
             from_square_index: None,
             to_square_index: None,
             promotion_piece: None,
+            piece_type: Some(Role::Pawn),
         };
         
         // Should return an error
@@ -177,6 +180,7 @@ mod tests {
             from_square_index: Some(4),
             to_square_index: Some(12),
             promotion_piece: None,
+            piece_type: Some(Role::King),
         };
         
         // Verify the move structure is accessible

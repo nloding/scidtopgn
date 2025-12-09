@@ -66,6 +66,18 @@ pub struct GameIndex {
     pub num_half_moves: u16,
 }
 
+impl GameIndex {
+    pub fn date_string(&self) -> String {
+        let year = self.year;
+        let month = self.month;
+        let day = self.day;
+        if year == 0 || month == 0 || day == 0 || month > 12 || day > 31 {
+            return "????.??.??".to_string();
+        }
+        format!("{year:04}.{month:02}.{day:02}")
+    }
+}
+
 pub struct Si4File {
     mmap: Mmap,
     header: ScidHeader,

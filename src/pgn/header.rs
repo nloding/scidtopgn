@@ -358,6 +358,7 @@ mod tests {
     #[test]
     fn test_from_game_state() {
         let mut game_state = GameState::new();
+        use crate::GameMetadata;
         game_state.set_metadata(GameMetadata {
             white: "WhitePlayer".to_string(),
             black: "BlackPlayer".to_string(),

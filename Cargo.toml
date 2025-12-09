@@ -18,6 +18,8 @@ path = "src/main.rs"
 # Chess engine and notation
 shakmaty = "0.26"
 pgn-reader = "0.26"
+# Phase 4.2: Performance optimization dependencies
+lazy_static = "1.4"
 
 # Error handling and utilities
 thiserror = "1.0"

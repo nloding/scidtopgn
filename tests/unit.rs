@@ -3,17 +3,19 @@
 //! This module contains focused unit tests for individual functions and components
 //! across the SCIDtoPGN library, ensuring each piece works correctly in isolation.
 
-use scidtopgn::api::ScidDatabase;
+use scidtopgn::api::{ScidDatabase, PgnExporter, ExportOptions};
 use scidtopgn::bridge::{GameState, GameMetadata, PositionContext};
 use scidtopgn::core::error::Result;
-use scidtopgn::formats::sg4::{Sg4File, find_game_boundaries};
-use scidtopgn::pgn::{PgnExporter, ExportOptions};
+use scidtopgn::sg4::{Sg4File, find_game_boundaries};
 use scidtopgn::position::{ScidPosition, Square, PieceType};
 use std::path::PathBuf;
+
+mod test_utils;
 
 /// Test database opening functionality
 #[test]
 fn test_database_opening() -> Result<()> {
+    mod test_utils; // ensure visibility
     let test_db_path = test_utils::five_test_data();
     
     // Test that database opens successfully
@@ -54,8 +56,8 @@ fn test_pgn_export() -> Result<()> {
     let game = db.games().next().unwrap();
     
     // Test PGN export with default options
-    let exporter = PgnExporter::new(&game.game_state, &game.parsed_game, ExportOptions::default());
-    let pgn_content = exporter.export();
+    let exporter = PgnExporter::new(&game.game_state, &game.parsed_game)?;
+    let pgn_content = exporter.export()?;
     
     // Test that PGN content contains expected elements
     assert!(pgn_content.contains("[Event"), "PGN should contain event header");
@@ -72,18 +74,22 @@ fn test_position_tracking() -> Result<()> {
     let mut position = ScidPosition::new_starting_position();
     
     // Test that position tracking works correctly
-    let white_pieces = position.piece_list(scidtopgn::Color::White);
-    let black_pieces = position.piece_list(scidtopgn::Color::Black);
+    let white_pieces = position.piece_list(scidtopgn::position::Color::White);
+    let black_pieces = position.piece_list(scidtopgn::position::Color::Black);
     
     // Test that piece lists have correct length
     assert_eq!(white_pieces.len(), 16, "White should have 16 pieces");
     assert_eq!(black_pieces.len(), 16, "Black should have 16 pieces");
     
     // Test that key pieces are in correct positions
-    assert_eq!(white_pieces[0], Square::E1, "White king should be at E1");
-    assert_eq!(white_pieces[12], Square::E2, "White E2 pawn should be at E2");
-    assert_eq!(black_pieces[0], Square::E8, "Black king should be at E8");
-    assert_eq!(black_pieces[12], Square::E7, "Black E7 pawn should be at E7");
+    let e1: Square = "e1".parse().unwrap();
+    let e2: Square = "e2".parse().unwrap();
+    let e7: Square = "e7".parse().unwrap();
+    let e8: Square = "e8".parse().unwrap();
+    assert_eq!(white_pieces[0], e1, "White king should be at E1");
+    assert_eq!(white_pieces[12], e2, "White E2 pawn should be at E2");
+    assert_eq!(black_pieces[0], e8, "Black king should be at E8");
+    assert_eq!(black_pieces[12], e7, "Black E7 pawn should be at E7");
     
     Ok(())
 }
@@ -203,8 +209,8 @@ fn test_export_options() -> Result<()> {
         custom_headers: std::collections::HashMap::new(),
     };
     
-    let exporter = PgnExporter::with_options(&game.game_state, &game.parsed_game, options);
-    let pgn_content = exporter.export();
+    let exporter = PgnExporter::with_options(&game.game_state, &game.parsed_game, options)?;
+    let pgn_content = exporter.export()?;
     
     // Test that PGN content contains optional tags
     assert!(pgn_content.contains("[WhiteElo"), "PGN should contain White ELO");
@@ -221,9 +227,9 @@ fn test_move_validation_by_piece_type() -> Result<()> {
     
     // Test pawn moves
     let pawn_moves = vec![
-        (Square::E2, Square::E4),   // Forward move
-        (Square::E2, Square::E3),   // Single square move
-        (Square::E4, Square::E5),   // Double pawn move
+        ("e2".parse().unwrap(), "e4".parse().unwrap()),   // Forward move
+        ("e2".parse().unwrap(), "e3".parse().unwrap()),   // Single square move
+        ("e4".parse().unwrap(), "e5".parse().unwrap()),   // Double pawn move
     ];
     
     for (from, to) in pawn_moves {
@@ -234,10 +240,10 @@ fn test_move_validation_by_piece_type() -> Result<()> {
     
     // Test knight moves
     let knight_moves = vec![
-        (Square::B1, Square::C3),   // Forward-right
-        (Square::B1, Square::A3),   // Forward-left
-        (Square::G1, Square::F3),   // Forward-right
-        (Square::G1, Square::H3),   // Forward-left
+        ("b1".parse().unwrap(), "c3".parse().unwrap()),   // Forward-right
+        ("b1".parse().unwrap(), "a3".parse().unwrap()),   // Forward-left
+        ("g1".parse().unwrap(), "f3".parse().unwrap()),   // Forward-right
+        ("g1".parse().unwrap(), "h3".parse().unwrap()),   // Forward-left
     ];
     
     for (from, to) in knight_moves {
@@ -248,8 +254,8 @@ fn test_move_validation_by_piece_type() -> Result<()> {
     
     // Test rook moves
     let rook_moves = vec![
-        (Square::A1, Square::A8),   // Vertical move
-        (Square::A1, Square::H1),   // Horizontal move
+        ("a1".parse().unwrap(), "a8".parse().unwrap()),   // Vertical move
+        ("a1".parse().unwrap(), "h1".parse().unwrap()),   // Horizontal move
     ];
     
     for (from, to) in rook_moves {

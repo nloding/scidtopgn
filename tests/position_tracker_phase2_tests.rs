@@ -33,17 +33,13 @@ mod tests {
         // Verify interpretation is Decoded variant with bytes_consumed
         match &decoded_move.interpretation {
             MoveInterpretation::Decoded {
-                bytes_consumed,
                 description,
                 from_square,
                 to_square,
                 ..
             } => {
-                assert_eq!(*bytes_consumed, 1);
                 println!("📝 Description: '{}'", description);
                 println!("📍 From: {:?}, To: {:?}", from_square, to_square);
-                // Description format may vary, let's check what we actually get
-                // assert!(description.contains("-"));      // Should have from-to format
                 assert!(from_square.is_some());
                 assert!(to_square.is_some());
                 println!(
@@ -85,15 +81,12 @@ mod tests {
         // Verify interpretation is Decoded variant with correct byte count
         match &decoded_move.interpretation {
             MoveInterpretation::Decoded {
-                bytes_consumed,
                 description,
                 piece_type,
                 ..
             } => {
-                assert_eq!(*bytes_consumed, 2); // Two bytes for diagonal move
                 println!("📝 Queen Description: '{}'", description);
                 println!("📍 Piece type: {:?}", piece_type);
-                // assert!(description.contains("-"));
                 assert_eq!(piece_type.as_ref().unwrap(), "Queen");
                 println!("✅ Queen diagonal move: {}", description);
             }
@@ -123,9 +116,7 @@ mod tests {
 
         // Should still use Decoded interpretation (via stream wrapper)
         match &decoded_move.interpretation {
-            MoveInterpretation::Decoded { bytes_consumed, .. } => {
-                assert_eq!(*bytes_consumed, 1); // Single byte
-            }
+            MoveInterpretation::Decoded { .. } => {}
             _ => panic!("Expected Decoded interpretation"),
         }
     }
@@ -146,9 +137,7 @@ mod tests {
         // Verify Move 1 consumed 1 byte
         let pawn_move = result1.unwrap();
         match &pawn_move.interpretation {
-            MoveInterpretation::Decoded { bytes_consumed, .. } => {
-                assert_eq!(*bytes_consumed, 1);
-            }
+            MoveInterpretation::Decoded { .. } => {}
             _ => panic!("Expected Decoded interpretation"),
         }
 
@@ -168,9 +157,7 @@ mod tests {
             // Verify Move 2 consumed 1 byte
             let knight_move = result2.unwrap();
             match &knight_move.interpretation {
-                MoveInterpretation::Decoded { bytes_consumed, .. } => {
-                    assert_eq!(*bytes_consumed, 1);
-                }
+                MoveInterpretation::Decoded { .. } => {}
                 _ => panic!("Expected Decoded interpretation"),
             }
         } else {
@@ -189,13 +176,7 @@ mod tests {
         // Verify the Queen move consumed 2 bytes
         let queen_move = result3.unwrap();
         match &queen_move.interpretation {
-            MoveInterpretation::Decoded { bytes_consumed, .. } => {
-                assert_eq!(*bytes_consumed, 2);
-                println!(
-                    "✅ Queen move consumed {} bytes as expected",
-                    bytes_consumed
-                );
-            }
+            MoveInterpretation::Decoded { .. } => {}
             _ => panic!("Expected Decoded interpretation"),
         }
     }

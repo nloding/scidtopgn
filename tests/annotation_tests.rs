@@ -1,7 +1,7 @@
-use scidtopgn::pgn::annotation_formatter::AnnotationFormatter;
-use scidtopgn::position::{PieceType, ScidMove, Square};
+use scidtopgn::api::annotation_formatter::AnnotationFormatter;
+use scidtopgn::api::{PieceType, ScidMove, Square};
 use scidtopgn::sg4::{
-    comment_processor::CommentProcessor, nag_processor::NagProcessor, VariationGameElement,
+    comment_processor::CommentProcessor, nag_processor::NagProcessor, StreamingGameElement as VariationGameElement,
     VariationMove,
 };
 

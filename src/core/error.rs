@@ -35,6 +35,41 @@ pub enum ScidError {
     MissingData { message: String },
 }
 
+#[derive(Debug, Error)]
+pub enum EnhancedDecodeError {
+    #[error("Piece index out of bounds: {0}")]
+    IndexOutOfBounds(u8),
+    #[error("Missing current position")]
+    MissingPosition,
+    #[error("Missing piece list")]
+    MissingPieceList,
+    #[error("Empty square at position: {0}")]
+    EmptySquareAtPosition(String),
+    #[error("Invalid move value: {0}")]
+    InvalidMoveValue(u8),
+    #[error("Missing field: {0}")]
+    MissingField(&'static str),
+    #[error("Shakmaty conversion error: {0}")]
+    ShakmatyConversion(String),
+    #[error("Invalid move: {0}")]
+    InvalidMove(String),
+}
+
+impl From<EnhancedDecodeError> for ScidError {
+    fn from(e: EnhancedDecodeError) -> Self {
+        match e {
+            EnhancedDecodeError::IndexOutOfBounds(v) => ScidError::invalid_format(format!("Piece index out of bounds: {}", v)),
+            EnhancedDecodeError::MissingPosition => ScidError::invalid_format("Missing current position"),
+            EnhancedDecodeError::MissingPieceList => ScidError::invalid_format("Missing piece list"),
+            EnhancedDecodeError::EmptySquareAtPosition(s) => ScidError::invalid_format(format!("Empty square at position: {}", s)),
+            EnhancedDecodeError::InvalidMoveValue(v) => ScidError::invalid_format(format!("Invalid move value: {}", v)),
+            EnhancedDecodeError::MissingField(f) => ScidError::invalid_format(format!("Missing field: {}", f)),
+            EnhancedDecodeError::ShakmatyConversion(s) => ScidError::Chess(s),
+            EnhancedDecodeError::InvalidMove(s) => ScidError::invalid_format(s),
+        }
+    }
+}
+
 impl ScidError {
     pub fn conversion_error(message: impl Into<String>) -> Self {
         ScidError::ConversionError {

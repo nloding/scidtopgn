@@ -1,5 +1,5 @@
-use scidtopgn::pgn::{EnhancedPgnExporter, ExportOptions};
-use scidtopgn::sg4::parse_pgn_tags;
+use scidtopgn::api::{EnhancedPgnExporter, ExportOptions};
+use scidtopgn::sg4::parse_streaming_state as parse_pgn_tags;
 use scidtopgn::si4::{parse_game_index, parse_header};
 use scidtopgn::sn4::parse_sn4_header;
 use std::collections::HashMap;
@@ -173,7 +173,7 @@ impl LargeScaleTestFramework {
         let exporter = EnhancedPgnExporter::new(ExportOptions::default());
 
         // Create a simple game index for testing
-        let simple_game_index = scidtopgn::pgn::exporter::SimpleGameIndex {
+        let simple_game_index = scidtopgn::api::exporter::SimpleGameIndex {
             event_id: 1,
             site_id: 1,
             white_id: 1,
@@ -190,7 +190,7 @@ impl LargeScaleTestFramework {
         };
 
         // Create simple name database
-        let mut simple_name_db = scidtopgn::pgn::exporter::SimpleNameDatabase::new();
+        let mut simple_name_db = scidtopgn::api::exporter::SimpleNameDatabase::new();
         simple_name_db
             .event_names
             .insert(1, "Test Event".to_string());

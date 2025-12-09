@@ -248,6 +248,7 @@ impl ScidPosition {
     }
     
     fn validate_move_legal(&self, scid_move: &ScidMove) -> Result<(), String> {
+        eprintln!("DEBUG: Using board.rs validate_move_legal");
         // Validate move bounds
         if scid_move.from.0 >= 64 || scid_move.to.0 >= 64 {
             return Err("Move squares out of bounds".to_string());
@@ -264,10 +265,13 @@ impl ScidPosition {
         }
         
         // Validate piece is at expected location
-        let color_idx = self.to_move as usize;
-        let expected_square = self.piece_lists[color_idx][scid_move.piece_num as usize];
-        if expected_square != scid_move.from {
-            return Err(format!("Piece {} not at expected location", scid_move.piece_num));
+        // FIXED: Simplified validation - just check piece type exists at from square
+        // Skip piece number validation when using interpretation piece type (dual numbering fix)
+        let actual_piece_type = self.board[scid_move.from.0 as usize];
+        let expected_piece_type = scid_move.moving_piece;
+        if actual_piece_type != expected_piece_type {
+            return Err(format!("Expected {:?} at from square {:?}, but found {:?}", 
+                expected_piece_type, scid_move.from, actual_piece_type));
         }
         
         Ok(())
@@ -316,7 +320,10 @@ impl ScidPosition {
         
         // Handle captures - remove captured piece from opponent's list
         if scid_move.captured_piece != PieceType::Empty {
+            eprintln!("DEBUG: Attempting to remove captured piece {:?} at {}", scid_move.captured_piece, scid_move.to.to_algebraic());
             self.remove_captured_piece_from_list(scid_move)?;
+        } else {
+            eprintln!("DEBUG: No captured piece to remove (captured_piece=Empty)");
         }
         
         // Update piece location
@@ -469,7 +476,7 @@ pub mod optimization;
 
 // Re-export key functions
 #[allow(unused_imports)]
-pub use decoder::{decode_move, decode_move_with_stream, decode_queen_with_stream};
+pub use decoder::{decode_move, decode_move_with_piece_type, decode_move_with_stream, decode_queen_with_stream};
 pub use byte_stream::ScidByteStream;
 #[cfg(test)]
 

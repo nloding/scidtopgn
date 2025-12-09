@@ -7,6 +7,14 @@
 mod integration;
 mod unit;
 mod property;
+mod diagnostics_helpers;
+mod move_interpretation_tests;
+mod root_cause_tests;
+mod focused_root_cause_test;
+mod fix_validation_tests;
+mod simple_fix_validation;
+mod end_to_end_tests;
+mod clean_end_to_end_tests;
 
 // Re-export common test utilities
 pub use integration::*;

@@ -6,11 +6,10 @@
 //! - Property-based testing for edge cases
 //! - Integration tests cover all major use cases
 
-use scidtopgn::api::ScidDatabase;
-use scidtopgn::bridge::{GameState, GameMetadata, PositionContext};
+mod test_utils;
+use scidtopgn::api::{ScidDatabase, GameState, PositionContext, PgnExporter, ExportOptions};
 use scidtopgn::core::error::Result;
-use scidtopgn::formats::sg4::{Sg4File, find_game_boundaries};
-use scidtopgn::pgn::{PgnExporter, ExportOptions};
+use scidtopgn::sg4::find_game_boundaries;
 use scidtopgn::position::{ScidPosition, Square, PieceType, Color};
 use std::path::PathBuf;
 
@@ -28,8 +27,8 @@ fn test_all_unit_tests_pass() -> Result<()> {
     
     // Test PGN export functionality
     let game = db.games().next().unwrap();
-    let exporter = PgnExporter::new(&game.game_state, &game.parsed_game, ExportOptions::default());
-    let pgn_content = exporter.export();
+    let exporter = PgnExporter::new(&game.game_state, &game.parsed_game)?;
+    let pgn_content = exporter.export()?;
     assert!(pgn_content.contains("[Event]"), "PGN should contain event header");
     
     // Test position tracking functionality
@@ -81,8 +80,8 @@ fn test_all_unit_tests_pass() -> Result<()> {
         include_annotations: true,
         custom_headers: std::collections::HashMap::new(),
     };
-    let exporter = PgnExporter::with_options(&game.game_state, &game.parsed_game, options);
-    let pgn_content = exporter.export();
+    let exporter = PgnExporter::with_options(&game.game_state, &game.parsed_game, options)?;
+    let pgn_content = exporter.export()?;
     assert!(pgn_content.contains("[WhiteElo]"), "PGN should contain White ELO");
     
     // Test error handling for invalid files
@@ -103,8 +102,8 @@ fn test_all_integration_tests_pass() -> Result<()> {
     
     // Test PGN export accuracy
     let game = db.games().next().unwrap();
-    let exporter = PgnExporter::new(&game.game_state, &game.parsed_game, ExportOptions::default());
-    let pgn_content = exporter.export();
+    let exporter = PgnExporter::new(&game.game_state, &game.parsed_game)?;
+    let pgn_content = exporter.export()?;
     assert!(pgn_content.contains("[Event]"), "PGN should contain event header");
     assert!(pgn_content.contains("[White]"), "PGN should contain white player header");
     assert!(pgn_content.contains("[Black]"), "PGN should contain black player header");
@@ -184,8 +183,8 @@ fn test_property_based_tests_work() -> Result<()> {
             custom_headers: std::collections::HashMap::new(),
         };
         
-        let exporter = PgnExporter::with_options(&game.game_state, &game.parsed_game, options);
-        let pgn_content = exporter.export();
+        let exporter = PgnExporter::with_options(&game.game_state, &game.parsed_game, options)?;
+        let pgn_content = exporter.export()?;
         
         assert!(pgn_content.contains("[Event]"), "PGN should contain event header");
         assert!(pgn_content.contains("[White]"), "PGN should contain white player header");

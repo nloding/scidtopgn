@@ -2,6 +2,7 @@ use crate::bridge::{GameState, PositionContext};
 use crate::core::error::{Result, ScidError};
 use crate::formats::sg4::{StreamingGameElement, StreamingGameParseState};
 use crate::bridge::moves::ScidToShakmaty;
+use crate::GameMetadata;  // Import GameMetadata
 use shakmaty::{Chess, Move, Position, san::San};
 use std::collections::HashMap;
 
@@ -318,6 +319,7 @@ impl PgnExporter {
             from_square_index: None,
             to_square_index: None,
             promotion_piece: None,
+            piece_type: None, // Not available in this context
         };
         
         // Use the bridge layer's ScidToShakmaty trait to convert to shakmaty move

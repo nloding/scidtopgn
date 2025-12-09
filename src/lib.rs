@@ -66,13 +66,19 @@
 //! - Minimal allocations during parsing
 
 // Declare internal modules as private
+mod analysis;
 mod bridge;
 pub mod cli;
-mod core;
-mod formats;
-mod pgn;
-mod position;
-mod variation;
+pub mod core;
+pub mod formats;
+pub mod pgn;
+pub mod position;
+pub mod variation;
+
+// Publicly re-export selected internal items for test compatibility
+pub use crate::formats::sg4 as sg4;
+pub use crate::formats::si4 as si4;
+pub use crate::formats::sg4::{StreamingGameElement, StreamingGameParseState, parse_pgn_tags_with_streaming, find_game_boundaries, parse_streaming_state};
 
 /// Curated, minimal public API for downstream consumers.
 ///
@@ -95,15 +101,23 @@ pub mod api {
     pub use crate::bridge::{
         ChessNotation, GameMetadata, GameState, PositionContext,
     };
+    pub use crate::bridge::BasicChessValidation;
 
     // Re-export the main PGN exporter
     pub use crate::pgn::{PgnExporter, ExportOptions};
+
+    // Re-export annotation/NAG formatting used by tests
+    pub use crate::pgn::annotation_formatter::AnnotationFormatter;
+    pub use crate::formats::sg4::NagProcessor;
 
     // Re-export position tracking types
     pub use crate::bridge::position_tracker::ScidPositionTracker;
     
     // Re-export the new PositionTracker for move conversion
     pub use crate::position::PositionTracker;
+
+    // Re-export commonly used chess types
+    pub use crate::position::{PieceType, ScidMove, Square};
 
     // Re-export PGN header management
     pub use crate::pgn::PgnHeader;
@@ -114,7 +128,7 @@ pub mod api {
 
 // Re-export legacy types for backward compatibility
 pub use crate::bridge::{GameState, GameMetadata, PositionContext, ChessNotation};
-pub use crate::core::error::{ScidError, Result};
+pub use crate::core::error::{ScidError, Result, EnhancedDecodeError};
 pub use crate::pgn::PgnExporter;
 pub use crate::variation::{VariationTree, Variation, VariationMove, VariationGameElement};
 
@@ -126,6 +140,7 @@ pub use crate::formats::ScidDatabase;
 
 // Re-export move types for direct access
 pub use crate::formats::{DecodedMove, MoveInterpretation};
+pub use crate::formats::sg4::SG4Parser;
 
 // Re-export position tracking for advanced users
 pub use crate::bridge::position_tracker::ScidPositionTracker;

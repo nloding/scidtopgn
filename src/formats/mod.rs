@@ -356,10 +356,11 @@ mod tests {
     fn test_scid_database_structure() {
         // Test that the structure compiles
         let _database = ScidDatabase {
-            si4_file: Si4File::open(PathBuf::from("test.si4")).unwrap(),
-            sn4_file: Sn4File::open(PathBuf::from("test.sn4")).unwrap(),
-            sg4_file: Sg4File::open(PathBuf::from("test.sg4")).unwrap(),
+            si4_file: Si4File::open(&PathBuf::from("test.si4")).unwrap(),
+            sn4_file: Sn4File::open(&PathBuf::from("test.sn4")).unwrap(),
+            sg4_file: Sg4File::open(&PathBuf::from("test.sg4")).unwrap(),
             validated: false,
+            base_path: PathBuf::from("test"),
         };
         
         // Test basic methods
@@ -370,10 +371,11 @@ mod tests {
     #[test]
     fn test_game_iterator() {
         let database = ScidDatabase {
-            si4_file: Si4File::open(PathBuf::from("test.si4")).unwrap(),
-            sn4_file: Sn4File::open(PathBuf::from("test.sn4")).unwrap(),
-            sg4_file: Sg4File::open(PathBuf::from("test.sg4")).unwrap(),
+            si4_file: Si4File::open(&PathBuf::from("test.si4")).unwrap(),
+            sn4_file: Sn4File::open(&PathBuf::from("test.sn4")).unwrap(),
+            sg4_file: Sg4File::open(&PathBuf::from("test.sg4")).unwrap(),
             validated: false,
+            base_path: PathBuf::from("test"),
         };
         
         let mut iterator = database.games();
@@ -383,10 +385,11 @@ mod tests {
     #[test]
     fn test_database_statistics() {
         let database = ScidDatabase {
-            si4_file: Si4File::open(PathBuf::from("test.si4")).unwrap(),
-            sn4_file: Sn4File::open(PathBuf::from("test.sn4")).unwrap(),
-            sg4_file: Sg4File::open(PathBuf::from("test.sg4")).unwrap(),
+            si4_file: Si4File::open(&PathBuf::from("test.si4")).unwrap(),
+            sn4_file: Sn4File::open(&PathBuf::from("test.sn4")).unwrap(),
+            sg4_file: Sg4File::open(&PathBuf::from("test.sg4")).unwrap(),
             validated: false,
+            base_path: PathBuf::from("test"),
         };
         
         let stats = database.statistics();

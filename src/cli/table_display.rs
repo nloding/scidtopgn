@@ -157,53 +157,38 @@ pub fn display_sg4_stats(db: &ScidDatabase) -> Result<()> {
 /// // Output: "📋 Moves (44): 1. Qxg1 Qxg2 2. Kxd2 Bh6 ..."
 /// ```
 fn display_game_moves(db: &ScidDatabase, game_index: u32) -> Result<()> {
-    use crate::position::{ScidPosition, decode_move, decode_move_with_stream, ScidByteStream};
+    use crate::bridge::moves::ScidToShakmaty;
+    use shakmaty::{Chess, Position};
     
     let game = db.get_game(game_index)?;
     
     if game.moves.is_empty() {
         println!("  📋 Moves: [No moves available]");
-        return Ok(());
+        return Ok(())
     }
     
-    let mut position = ScidPosition::new_starting_position();
+    let mut chess = Chess::default();
     let mut notations = Vec::new();
     let mut error_count = 0;
     
     for (i, decoded_move) in game.moves.iter().enumerate() {
-        let scid_move = if decoded_move.raw_bytes.len() > 1 {
-            // Multi-byte move: use stream-based decoder (for queen diagonals, etc.)
-            let mut stream = ScidByteStream::new(&decoded_move.raw_bytes);
-            match decode_move_with_stream(&position, &mut stream) {
-                Ok(mv) => mv,
-                Err(e) => {
-                    eprintln!("    ⚠️  Error decoding multi-byte move {}: {}", i + 1, e);
-                    error_count += 1;
-                    continue;
+        match decoded_move.to_shakmaty(&chess) {
+            Ok(mv) => {
+                // Simple notation (UCI): e2e4
+                notations.push(format!("{}", mv));
+                
+                match chess.clone().play(&mv) {
+                    Ok(next) => chess = next,
+                    Err(e) => {
+                        eprintln!("    ⚠️  Error applying move {}: {}", i + 1, e);
+                        error_count += 1;
+                    }
                 }
             }
-        } else {
-            // Single-byte move: reconstruct move byte and decode
-            let move_byte = (decoded_move.piece_num << 4) | decoded_move.move_value;
-            match decode_move(&position, move_byte) {
-                Ok(mv) => mv,
-                Err(e) => {
-                    eprintln!("    ⚠️  Error decoding move {}: {}", i + 1, e);
-                    error_count += 1;
-                    continue;
-                }
+            Err(e) => {
+                eprintln!("    ⚠️  Error converting move {}: {}", i + 1, e);
+                error_count += 1;
             }
-        };
-        
-        // Convert to algebraic notation using current position
-        let notation = scid_move.to_algebraic(&position);
-        notations.push(notation);
-        
-        // Apply move to update position for next move
-        if let Err(e) = position.do_move(&scid_move) {
-            eprintln!("    ⚠️  Error applying move {}: {}", i + 1, e);
-            error_count += 1;
-            // Continue with next move using best effort position
         }
     }
     

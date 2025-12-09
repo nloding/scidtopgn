@@ -995,10 +995,11 @@ mod tests {
             raw_bytes: vec![0x81],
             piece_num: 8,  // First pawn (index 8 in SCID piece ordering = A2 pawn)
             move_value: 1, // Simple move forward
-            interpretation: MoveInterpretation::Pawn { promotion: None },
+            interpretation: MoveInterpretation::Pawn { direction: "capture-left".to_string(), promotion: None, is_en_passant: Some(false) },
             from_square_index: None,
             to_square_index: None,
             promotion_piece: None,
+            piece_type: Some(Role::Pawn),
         };
 
         // Apply the move through the complete pipeline
@@ -1136,14 +1137,14 @@ mod tests {
 
         // Test successful WHITE castling verification from starting position (White to move)
         // White kingside castling (E1 -> G1, H1 rook)
-        let result = tracker.verify_castling_legality(Square::E1, Square::H1);
+        let result = tracker.verify_castling_legality(Square::E1, Square::H1, Square::F1);
         assert!(
             result.is_ok(),
             "White kingside castling verification should succeed in starting position"
         );
 
         // White queenside castling (E1 -> C1, A1 rook)
-        let result = tracker.verify_castling_legality(Square::E1, Square::A1);
+        let result = tracker.verify_castling_legality(Square::E1, Square::A1, Square::D1);
         assert!(
             result.is_ok(),
             "White queenside castling verification should succeed in starting position"
@@ -1151,13 +1152,13 @@ mod tests {
 
         // Test failure cases for BLACK pieces (it's White's turn, so Black pieces should fail)
         // Black pieces should fail because it's White to move
-        let result = tracker.verify_castling_legality(Square::E8, Square::H8);
+        let result = tracker.verify_castling_legality(Square::E8, Square::H8, Square::F8);
         assert!(
             result.is_err(),
             "Black kingside castling verification should fail when it's White to move"
         );
 
-        let result = tracker.verify_castling_legality(Square::E8, Square::A8);
+        let result = tracker.verify_castling_legality(Square::E8, Square::A8, Square::D8);
         assert!(
             result.is_err(),
             "Black queenside castling verification should fail when it's White to move"
@@ -1165,14 +1166,14 @@ mod tests {
 
         // Test other failure cases
         // Try to castle with non-existent rook
-        let result = tracker.verify_castling_legality(Square::E1, Square::E2);
+        let result = tracker.verify_castling_legality(Square::E1, Square::E2, Square::F1);
         assert!(
             result.is_err(),
             "Castling verification should fail when no rook present"
         );
 
         // Try to castle with wrong piece (pawn instead of rook)
-        let result = tracker.verify_castling_legality(Square::E1, Square::A2);
+        let result = tracker.verify_castling_legality(Square::E1, Square::A2, Square::D1);
         assert!(
             result.is_err(),
             "Castling verification should fail when pawn found instead of rook"

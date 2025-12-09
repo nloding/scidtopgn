@@ -53,6 +53,7 @@ pub fn scid_move_to_decoded_move(scid_move: &ScidMove, raw_bytes: &[u8]) -> Deco
         from_square_index: Some(scid_move.from.0),
         to_square_index: Some(scid_move.to.0),
         promotion_piece: None, // TODO
+        piece_type: None, // Not available in this context
     }
 }
 
@@ -64,9 +65,11 @@ pub fn decode_move_with_position(
     raw_byte: u8,
     _offset: usize,
 ) -> Result<DecodedMove, String> {
+    eprintln!("DEBUG: decode_move_with_position called with raw_byte: 0x{:02X}", raw_byte);
     // Use our position-aware decoder
     match decode_move(position, raw_byte) {
         Ok(scid_move) => {
+            eprintln!("DEBUG: decode_move returned ScidMove with moving_piece: {:?}", scid_move.moving_piece);
             // Convert to existing format for compatibility
             Ok(scid_move_to_decoded_move(&scid_move, &[raw_byte]))
         }
@@ -105,11 +108,15 @@ impl PositionTracker {
         _offset: usize,
     ) -> Result<DecodedMove, String> {
         let start = stream.position();
-        let result = decode_move_with_stream(&self.position, stream);
+        let raw_byte = match stream.get_byte() {
+            Ok(b) => b,
+            Err(_) => return Err("No byte available in stream".to_string()),
+        };
+        let result = decode_move_with_position(&self.position, raw_byte, _offset);
         let bytes_consumed = stream.position().saturating_sub(start);
         match result {
-            Ok(scid_move) => {
-                let decoded = self.scid_move_to_decoded(scid_move, stream, start, bytes_consumed);
+            Ok(decoded) => {
+                eprintln!("DEBUG: decoded DecodedMove: moving_piece {:?}", decoded.piece_type);
                 // apply to internal position; ignore apply errors for now
                 let _ = self
                     .position
@@ -154,6 +161,7 @@ impl PositionTracker {
             from_square_index: Some(scid_move.from.0),
             to_square_index: Some(scid_move.to.0),
             promotion_piece: None,
+            piece_type: None, // Not available in this context
         }
     }
 
