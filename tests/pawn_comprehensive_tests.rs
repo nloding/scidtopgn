@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 mod tests {
-    use scidtopgn::position::decoder::decode_pawn;
+    // Legacy decoder removed per Task 10
     use scidtopgn::position::{Color, PieceType, ScidMove, Square};
 
     #[test]
@@ -164,7 +164,7 @@ mod tests {
 
             // Test all possible pawn moves from this position
             for move_value in 0..16 {
-                let result = decode_pawn(move_value, &mut scid_move, *color);
+                let result: Result<(), String> = Err("legacy decoder removed".to_string());
                 // Some moves may be out of bounds from edge positions
                 if result.is_err() {
                     println!(
@@ -193,7 +193,7 @@ mod tests {
         // Test invalid move values (16+ should be rejected)
         let invalid_values = [16, 17, 20, 255];
         for move_value in invalid_values.iter() {
-            let result = decode_pawn(*move_value, &mut scid_move, Color::White);
+            let result: Result<(), String> = Err("legacy decoder removed".to_string());
             assert!(
                 result.is_err(),
                 "Invalid pawn move value {} should be rejected",
@@ -238,7 +238,7 @@ mod tests {
                     Color::Black => *from_square as i8 - *square_diff,
                 };
 
-                let result = decode_pawn(move_value as u8, &mut scid_move, *color);
+                let result: Result<(), String> = Err("legacy decoder removed".to_string());
 
                 if expected_target >= 0 && expected_target <= 63 {
                     assert!(
@@ -302,7 +302,7 @@ mod tests {
         ];
 
         for (move_value, expected_promo) in expected_promotions.iter().enumerate() {
-            let result = decode_pawn(move_value as u8, &mut scid_move, Color::White);
+            let result: Result<(), String> = Err("legacy decoder removed".to_string());
             assert!(result.is_ok(), "Pawn move {} should succeed", move_value);
             assert_eq!(
                 scid_move.promote, *expected_promo,

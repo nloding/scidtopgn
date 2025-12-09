@@ -2,7 +2,6 @@
 // Phase 5 Step 5.1 from POSITION_TRACKING_IMPLEMENTATION_PLAN.md
 
 use crate::formats::sg4::StreamingGameElement;
-use crate::position::decoder::decode_move_with_stream;
 use crate::position::{ScidByteStream, ScidPosition};
 use std::time::{Duration, Instant};
 
@@ -181,17 +180,8 @@ impl MonitoredPositionTracker {
     ) -> Result<StreamingGameElement, String> {
         let start_time = Instant::now();
         let initial_pos = stream.position();
-        // Decode a move in current position context
-        let result = match decode_move_with_stream(&self.position, stream) {
-            Ok(scid_move) => {
-                // Apply to position for subsequent decoding
-                let _ = self.position.do_move(&scid_move);
-                Ok(StreamingGameElement::Move {
-                    raw: stream.get_consumed_bytes(initial_pos),
-                })
-            }
-            Err(e) => Err(e),
-        };
+        // Legacy decoder removed; return an error-compatible result for now
+        let result: Result<StreamingGameElement, String> = Err::<StreamingGameElement, String>("legacy decoder removed".to_string());
         let decode_duration = start_time.elapsed();
 
         self.metrics

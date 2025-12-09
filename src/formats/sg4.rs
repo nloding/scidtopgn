@@ -10,7 +10,7 @@
 
 use crate::core::error::{Result, ScidError, EnhancedDecodeError};
 use memmap2::Mmap;
-use shakmaty::{Chess, Position, Setup, Role, Color, Square};
+use shakmaty::{Chess, Position, Role, Color, Square};
 use std::fs::File;
 use std::path::Path;
 
@@ -57,6 +57,8 @@ pub struct DecodedMove {
 }
 
 /// SG4Parser maintains decoding state: shakmaty position and SCID piece list
+/// Parser maintaining shakmaty board and SCID indices for role-driven decoding
+/// Index semantics: piece_num (0..15) indexes current_piece_list; routing uses role_at_square.
 pub struct SG4Parser {
     pub data: Vec<u8>,
     pub offset: usize,
@@ -109,6 +111,8 @@ impl SG4Parser {
         })
     }
 
+    /// Role-based single-byte decoder: derives role at from-square and advances offset by 1.
+    /// Rationale: avoids dual numbering conflicts by using board state for routing.
     pub fn decode_single_byte_move(&mut self, byte: u8) -> std::result::Result<DecodedMove, EnhancedDecodeError> {
         let piece_num = (byte >> 4) & 0x0F;
         let move_value = byte & 0x0F;
@@ -211,6 +215,8 @@ impl SG4Parser {
         move_value >= 8
     }
 
+    /// Queen diagonal multi-byte start: consumes second byte, computes direction+distance.
+    /// Rationale: centralizes multi-byte handling to ensure correct offset and target square.
     pub fn decode_queen_diagonal_start(&mut self, first_byte: u8) -> std::result::Result<DecodedMove, EnhancedDecodeError> {
         if self.offset + 1 >= self.data.len() {
             return Err(EnhancedDecodeError::InvalidMove("Queen diagonal move extends beyond data bounds".to_string()));
@@ -1518,7 +1524,6 @@ impl StreamingGameParseState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     #[test]
     fn test_constants() {

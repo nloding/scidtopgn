@@ -6,14 +6,14 @@
 use scidtopgn::api::{ScidDatabase, PgnExporter, ExportOptions};
 use scidtopgn::sg4::{Sg4File, find_game_boundaries};
 use scidtopgn::position::{Square, PieceType, ScidPosition, Color};
-use crate::test_utils;
+use scidtopgn::{GameState, GameMetadata, PositionContext};
 use std::path::PathBuf;
 use anyhow::Result;
 
 /// Test SG4 file parsing functionality
 #[test]
 fn test_sg4_file_parsing() -> Result<()> {
-    let sg4_path = test_utils::five_test_data().with_extension("sg4");
+    let sg4_path = crate::test_utils::five_test_data().with_extension("sg4");
     let sg4_data = std::fs::read(&sg4_path)?;
     
     // Test that we can find game boundaries

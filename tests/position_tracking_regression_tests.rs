@@ -2,7 +2,7 @@
 // Phase 4 Step 4.2 from POSITION_TRACKING_IMPLEMENTATION_PLAN.md
 
 use scidtopgn::sg4::parse_streaming_state;
-use scidtopgn::si4::{parse_game_index, parse_header};
+use scidtopgn::formats::si4::{parse_game_index, parse_header};
 use std::io::Cursor;
 
 /// Test all games in five.sg4 with position tracking
@@ -175,7 +175,7 @@ fn test_against_reference_pgn() {
 
         match parse_scid_game_with_position_tracking(game_idx) {
             Ok(parsed_result) => {
-                let stats = &parsed_result.position_tracker_stats;
+                let elements = &parsed_result.elements;
 
                 println!(
                     "   📊 SCID parsing: {:.1}% success ({}/{} moves)",
@@ -414,9 +414,10 @@ fn validate_move_sequence_compatibility(
     parsed_result: &scidtopgn::sg4::StreamingGameParseState,
     reference_game: &ReferenceGame,
 ) {
-    let stats = &parsed_result.position_tracker_stats;
+    let elements = &parsed_result.elements;
 
     println!("   🔍 Move sequence compatibility check:");
+    let elements = &parsed_result.elements;
     println!(
         "      📊 SCID: {} total moves, {} successful",
         elements.iter().filter(|e| matches!(e, scidtopgn::sg4::StreamingGameElement::Move { .. })).count(),

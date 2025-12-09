@@ -122,7 +122,7 @@ fn test_end_to_end_primary_fix_case() {
     println!("Fix routes correctly: {} ({})", 
              new_converter,
              if fix_routes_correctly { "✅" } else { "❌" });
-    println!("Move value valid: {} ({})", 
+    println!("Move value valid: {}", 
              if move_value_valid { "✅" } else { "❌" });
     
     // Primary case validation

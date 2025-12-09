@@ -4,7 +4,7 @@
 //! by systematically testing piece lookup mismatches.
 
 use scidtopgn::formats::sg4::{DecodedMove, MoveInterpretation};
-use scidtopgn::bridge::moves::{ScidToShakmaty};
+use scidtopgn::bridge::moves::ScidToShakmaty;
 use shakmaty::{Chess, Role, Color};
 
 /// Test for the classic 0x6C case - should confirm root cause
@@ -45,9 +45,10 @@ fn test_root_cause_0x6c_pawn_knight_promotion() {
         from_square_index: None,
         to_square_index: None,
         promotion_piece: Some("Knight".to_string()),
+        piece_type: Some(Role::Pawn),
     };
     
-    match decoded.to_shakmaty(&position) {
+    match ScidToShakmaty::to_shakmaty(&decoded, &position) {
         Ok(chess_move) => {
             panic!("Expected conversion failure but got: {:?}", chess_move);
         }
@@ -167,6 +168,15 @@ fn test_systematic_piece_type_conflicts() {
                 from_square_index: None,
                 to_square_index: None,
                 promotion_piece: None,
+                piece_type: match &interpretation {
+                    MoveInterpretation::King { .. } => Some(Role::King),
+                    MoveInterpretation::Queen => Some(Role::Queen),
+                    MoveInterpretation::Rook => Some(Role::Rook),
+                    MoveInterpretation::Bishop => Some(Role::Bishop),
+                    MoveInterpretation::Knight { .. } => Some(Role::Knight),
+                    MoveInterpretation::Pawn { .. } => Some(Role::Pawn),
+                    _ => None,
+                },
             };
             
             // This should either fail or produce wrong results
@@ -206,6 +216,7 @@ fn test_fix_approach_preserve_piece_type() {
         from_square_index: None,
         to_square_index: None,
         promotion_piece: Some("Knight".to_string()),
+        piece_type: Some(Role::Pawn),
     };
     
     println!("Test case: 0x6C Pawn with Knight promotion");
@@ -221,7 +232,7 @@ fn test_fix_approach_preserve_piece_type() {
     }
     
     // For now, current code still fails because it uses piece_num
-    match decoded_with_piece_type.to_shakmaty(&position) {
+    match ScidToShakmaty::to_shakmaty(&decoded_with_piece_type, &position) {
         Err(e) => {
             println!("🔴 Current code still fails: {}", e);
             println!("💡 Fix: Use interpretation for routing, not piece_num");
@@ -275,6 +286,15 @@ fn test_comprehensive_root_cause_validation() {
             from_square_index: None,
             to_square_index: None,
             promotion_piece: None,
+            piece_type: match &interpretation {
+                MoveInterpretation::King { .. } => Some(Role::King),
+                MoveInterpretation::Queen => Some(Role::Queen),
+                MoveInterpretation::Rook => Some(Role::Rook),
+                MoveInterpretation::Bishop => Some(Role::Bishop),
+                MoveInterpretation::Knight { .. } => Some(Role::Knight),
+                MoveInterpretation::Pawn { .. } => Some(Role::Pawn),
+                _ => None,
+            },
         };
         
         // Test conversion

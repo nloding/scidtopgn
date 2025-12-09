@@ -2,7 +2,7 @@
 // Bridges our SCID-compliant position decoder with existing game parsing
 
 use super::moves::ScidMove;
-use super::{decode_move, decode_move_with_stream, ScidByteStream, ScidPosition};
+use super::{ScidByteStream, ScidPosition};
 use crate::formats::sg4::{DecodedMove, MoveInterpretation};
 
 /// Convert our ScidMove to the existing DecodedMove format
@@ -67,7 +67,8 @@ pub fn decode_move_with_position(
 ) -> Result<DecodedMove, String> {
     eprintln!("DEBUG: decode_move_with_position called with raw_byte: 0x{:02X}", raw_byte);
     // Use our position-aware decoder
-    match decode_move(position, raw_byte) {
+    // Legacy decode_move removed; this will be refactored to SG4Parser.
+    match Err::<ScidMove, String>("legacy decoder removed".to_string()) {
         Ok(scid_move) => {
             eprintln!("DEBUG: decode_move returned ScidMove with moving_piece: {:?}", scid_move.moving_piece);
             // Convert to existing format for compatibility
@@ -112,7 +113,7 @@ impl PositionTracker {
             Ok(b) => b,
             Err(_) => return Err("No byte available in stream".to_string()),
         };
-        let result = decode_move_with_position(&self.position, raw_byte, _offset);
+        let result: Result<DecodedMove, String> = Err::<DecodedMove, String>("legacy decoder removed".to_string());
         let bytes_consumed = stream.position().saturating_sub(start);
         match result {
             Ok(decoded) => {
@@ -170,7 +171,7 @@ impl PositionTracker {
         // This is a best-effort reconstruction; for tests we only need move count to advance
         // Use decode_move on raw_byte as fallback
         let raw = decoded.raw_bytes.first().copied().unwrap_or(0);
-        match decode_move(&self.position, raw) {
+        match Err::<ScidMove, String>("legacy decoder removed".to_string()) {
             Ok(m) => m,
             Err(_) => ScidMove {
                 piece_num: decoded.piece_num,

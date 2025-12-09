@@ -7,11 +7,11 @@ pub fn five_test_data() -> PathBuf {
 
 pub fn create_test_database() -> Result<scidtopgn::api::ScidDatabase> {
     let base = five_test_data();
-    scidtopgn::api::ScidDatabase::open(&base)
+    Ok(scidtopgn::api::ScidDatabase::open(&base)?)
 }
 
 pub fn create_test_database_with_path(base: &Path) -> Result<scidtopgn::api::ScidDatabase> {
-    scidtopgn::api::ScidDatabase::open(base)
+    Ok(scidtopgn::api::ScidDatabase::open(base)?)
 }
 
 pub fn test_files_exist() -> bool {

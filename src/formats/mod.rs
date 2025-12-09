@@ -144,18 +144,110 @@ impl ScidDatabase {
         // Get game index from si4 file
         let game_index = self.si4_file.get_game(index)?;
         
-        // Try to get moves from SG4 file, but don't fail if unavailable
-        // Try to get moves from SG4 file, but don't fail if unavailable
-        let moves = match self.sg4_file.get_game(index as usize) {
-            Ok(game_record) => game_record.moves,
-            Err(e) => {
-                eprintln!("Warning: Could not load moves for game {}: {}", index, e);
-                Vec::new()
+        // Decode moves using SG4Parser streaming model; do not fail hard on errors
+        let sg4_path = self.base_path.with_extension("sg4");
+        let mut moves: Vec<DecodedMove> = Vec::new();
+        let parsed_game = if let Ok(data) = std::fs::read(&sg4_path) {
+            // Parse streaming elements (comments, nags, variations, moves)
+            match crate::formats::sg4::parse_streaming_state(&data) {
+                Ok(stream_state) => {
+                    // Decode moves using SG4Parser with proper offset management
+                    let mut parser = crate::formats::sg4::SG4Parser::new(data.clone());
+                    // Use legacy tag parser to find moves start offset for accurate offset tracking
+                    if let Ok(legacy_state) = crate::formats::sg4::parse_pgn_tags(&data) {
+                        let mut current_offset = legacy_state.moves_start_offset;
+                        while current_offset < data.len() {
+                            let byte = data[current_offset];
+                            match byte {
+                                15 => {
+                                    // Advance past result byte and stop
+                                    if current_offset + 1 < data.len() {
+                                        current_offset += 2;
+                                    } else {
+                                        current_offset += 1;
+                                    }
+                                    break;
+                                }
+                                11 => {
+                                    // Skip NAG value
+                                    if current_offset + 1 < data.len() {
+                                        current_offset += 2;
+                                    } else {
+                                        current_offset += 1;
+                                    }
+                                }
+                                12 => {
+                                    // Skip comment string: length-prefixed
+                                    if current_offset + 1 < data.len() {
+                                        let length = data[current_offset + 1] as usize;
+                                        let advance = 1 + 1 + length; // marker + length + bytes
+                                        current_offset = current_offset.saturating_add(advance);
+                                        if current_offset > data.len() { current_offset = data.len(); }
+                                    } else {
+                                        current_offset += 1;
+                                    }
+                                }
+                                13 | 14 => {
+                                    // Variation markers: single byte
+                                    current_offset += 1;
+                                }
+                                _ => {
+                                    // Regular move
+                                    parser.offset = current_offset;
+                                    let piece_num = (byte >> 4) & 0x0F;
+                                    let move_value = byte & 0x0F;
+                                    let decoded_move = if piece_num == 2 && move_value >= 8 {
+                                        // Queen diagonal: multi-byte
+                                        if current_offset + 1 < data.len() {
+                                            let dm = match parser.decode_queen_diagonal_start(byte) {
+                                                Ok(dm) => dm,
+                                                Err(e) => {
+                                                    eprintln!("Warning: Failed to decode queen diagonal at offset {}: {}", current_offset, e);
+                                                    // Skip two bytes and continue
+                                                    current_offset += 2;
+                                                    continue;
+                                                }
+                                            };
+                                            current_offset += 2;
+                                            dm
+                                        } else {
+                                            // Not enough data; skip
+                                            current_offset += 1;
+                                            continue;
+                                        }
+                                    } else {
+                                        let dm = match parser.decode_single_byte_move(byte) {
+                                            Ok(dm) => dm,
+                                            Err(e) => {
+                                                eprintln!("Warning: Failed to decode move at offset {}: {}", current_offset, e);
+                                                current_offset += 1;
+                                                continue;
+                                            }
+                                        };
+                                        current_offset += 1;
+                                        parser.offset = current_offset;
+                                        dm
+                                    };
+                                    // Update position and collect move
+                                    if let Err(e) = parser.update_position(&decoded_move) {
+                                        eprintln!("Warning: Failed to update position at offset {}: {}", current_offset, e);
+                                    }
+                                    moves.push(decoded_move);
+                                }
+                            }
+                        }
+                    }
+                    stream_state
+                }
+                Err(e) => {
+                    eprintln!("Warning: Could not parse streaming state for game {}: {}", index, e);
+                    crate::formats::sg4::StreamingGameParseState::new()
+                }
             }
+        } else {
+            eprintln!("Warning: Could not read SG4 file at {:?}", sg4_path);
+            crate::formats::sg4::StreamingGameParseState::new()
         };
-        
-        // Create empty parsed game for now
-        let parsed_game = crate::formats::sg4::StreamingGameParseState::new();
         
         // Create game state with metadata
         let mut game_state = crate::bridge::GameState::new();

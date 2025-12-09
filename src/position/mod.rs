@@ -67,7 +67,7 @@ pub mod moves;
 pub mod move_converter;
 pub mod byte_stream;
 pub mod debug;
-pub mod decoder;
+
 pub mod integration;
 pub mod optimization;
 pub mod performance;
@@ -79,10 +79,10 @@ pub mod unified_piece;
 // Re-export key functions and types
 pub use moves::{Color, PieceType, ScidMove, Square};
 pub use move_converter::PositionTracker;
-pub use decoder::{decode_move, decode_move_with_piece_type, decode_move_with_stream};
+
 
 #[cfg(test)]
-mod decoder_tests;
+
 #[allow(unused_imports)]
 pub use state_manager::{PositionState, PositionStateManager};
 #[allow(unused_imports)]

@@ -465,9 +465,7 @@ impl ScidPosition {
 
 // Re-export types from moves module
 pub mod moves;
-pub mod decoder;
 pub mod tests;
-pub mod integration;
 pub mod byte_stream;
 pub mod state_manager;
 pub mod debug;
@@ -475,8 +473,6 @@ pub mod performance;
 pub mod optimization;
 
 // Re-export key functions
-#[allow(unused_imports)]
-pub use decoder::{decode_move, decode_move_with_piece_type, decode_move_with_stream, decode_queen_with_stream};
 pub use byte_stream::ScidByteStream;
 #[cfg(test)]
 

@@ -804,7 +804,7 @@ mod tests {
         let position = Chess::default();
         let regular_move = create_shakmaty_move(Role::Pawn, from, Some(to), false, false, None, &position).unwrap();
         assert_eq!(regular_move.role(), Role::Pawn);
-        assert_eq!(regular_move.from(), from);
+        assert_eq!(regular_move.from(), Some(from));
         assert_eq!(regular_move.to(), to);
         assert!(!regular_move.is_capture());
         assert!(regular_move.promotion().is_none());

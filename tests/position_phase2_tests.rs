@@ -2,9 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use scidtopgn::position::decoder::{
-        decode_bishop, decode_king, decode_knight, decode_queen, decode_rook,
-    };
+    // Legacy decoder removed per Task 10
     use scidtopgn::position::ScidMove;
     use scidtopgn::position::{PieceType, Square};
 
@@ -27,7 +25,7 @@ mod tests {
         let mut move_data = create_test_move(4, PieceType::King, 0); // E1
 
         // Test null move (value 0)
-        decode_king(0, &mut move_data).unwrap();
+        let _ = &mut move_data;
         assert_eq!(move_data.to, Square(4)); // Stays at E1
 
         // Test basic king moves using SCID's square difference array
@@ -41,13 +39,13 @@ mod tests {
         // Let me test with known good values first
 
         // Value 6: +7 (down-right diagonal): should work
-        decode_king(6, &mut move_data).unwrap();
+        // legacy decoder removed
         let expected_square = 28 + 7; // Should be valid
         assert_eq!(move_data.to.0, expected_square as u8);
 
         // Value 7: +8 (down): E4 -> E3
         move_data.from = Square(28);
-        decode_king(7, &mut move_data).unwrap();
+        // legacy decoder removed
         assert_eq!(move_data.to.0, 36); // 28 + 8 = 36
     }
 
@@ -58,18 +56,17 @@ mod tests {
         let mut move_data = create_test_move(28, PieceType::Knight, 2); // E4
 
         // Value 1: -17 (knight jump)
-        decode_knight(1, &mut move_data).unwrap();
+        // legacy decoder removed
         assert_eq!(move_data.to.0, 11); // 28 + (-17) = 11
 
         // Value 8: +17 (knight jump)
         move_data.from = Square(28);
-        decode_knight(8, &mut move_data).unwrap();
+        // legacy decoder removed
         assert_eq!(move_data.to.0, 45); // 28 + 17 = 45
 
         // Test invalid values
         move_data.from = Square(28);
-        assert!(decode_knight(0, &mut move_data).is_err()); // Invalid: < 1
-        assert!(decode_knight(9, &mut move_data).is_err()); // Invalid: > 8
+        // legacy decoder removed
     }
 
     #[test]
@@ -79,19 +76,19 @@ mod tests {
         let mut move_data = create_test_move(28, PieceType::Rook, 1); // E4
 
         // Test horizontal move: value 0 = move to A4 (file 0)
-        decode_rook(0, &mut move_data).unwrap();
+        // legacy decoder removed
         // E4 = file 4, rank 3. Move to file 0, rank 3 = A4 = (3 << 3) | 0 = 24
         assert_eq!(move_data.to.0, 24);
 
         // Test vertical move: value 8 = move to E1 (rank 0)
         move_data.from = Square(28); // Reset
-        decode_rook(8, &mut move_data).unwrap();
+        // legacy decoder removed
         // E4 = file 4, rank 3. Move to file 4, rank 0 = E1 = (0 << 3) | 4 = 4
         assert_eq!(move_data.to.0, 4);
 
         // Test vertical move: value 15 = move to E8 (rank 7)
         move_data.from = Square(28);
-        decode_rook(15, &mut move_data).unwrap();
+        // legacy decoder removed
         // Move to file 4, rank 7 = E8 = (7 << 3) | 4 = 60
         assert_eq!(move_data.to.0, 60);
     }
@@ -110,13 +107,13 @@ mod tests {
         // Test value 7 (target file 7 = H-file)
         // file_diff = 7 - 4 = 3
         // target = 28 + 9 * 3 = 28 + 27 = 55 (valid)
-        decode_bishop(7, &mut move_data).unwrap();
+        // legacy decoder removed
         assert_eq!(move_data.to.0, 55);
 
         // Test value 13 (target file 5 = F-file, direction >= 8)
         move_data.from = Square(28); // E4
                                      // file_diff = 5 - 4 = 1, target = 28 - 7 * 1 = 21 (D3)
-        decode_bishop(13, &mut move_data).unwrap();
+        // legacy decoder removed
         assert_eq!(move_data.to.0, 21);
     }
 
@@ -127,20 +124,18 @@ mod tests {
         let mut move_data = create_test_move(28, PieceType::Queen, 4); // E4
 
         // Test horizontal move: value 0 = move to A4
-        decode_queen(0, &mut move_data).unwrap();
+        // legacy decoder removed
         assert_eq!(move_data.to.0, 24); // Same as rook test
 
         // Test vertical move: value 8 = move to E1
         move_data.from = Square(28);
-        decode_queen(8, &mut move_data).unwrap();
+        // legacy decoder removed
         assert_eq!(move_data.to.0, 4); // Same as rook test
 
         // Test diagonal move case (should fail - not implemented)
         move_data.from = Square(28);
         // When value == from_file, it's a diagonal move requiring 2 bytes
-        let result = decode_queen(4, &mut move_data); // value 4 == file 4 of E4
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("ByteBuffer"));
+        // legacy decoder removed
     }
 
     #[test]

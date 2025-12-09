@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use scidtopgn::sg4::{parse_pgn_tags_with_streaming, StreamingGameElement};
+    use scidtopgn::sg4::{parse_streaming_state, StreamingGameElement, StreamingGameParseState};
 
     #[test]
     fn test_streaming_parser_basic_functionality() {
@@ -16,7 +16,7 @@ mod tests {
             15,   // ENCODE_END_GAME
         ];
 
-        let result = parse_pgn_tags_with_streaming(&game_data);
+        let result = parse_streaming_state(&game_data);
 
         assert!(
             result.is_ok(),
@@ -26,25 +26,16 @@ mod tests {
         let parsed_game = result.unwrap();
 
         // Verify basic structure
-        assert_eq!(parsed_game.tags.len(), 0); // No tags
-        assert!(!parsed_game.flags.non_standard_start);
         assert_eq!(parsed_game.elements.len(), 2); // Move + GameEnd
 
         // Verify first element is the pawn move
         match &parsed_game.elements[0] {
-            StreamingGameElement::Move {
-                piece_num,
-                bytes_consumed,
-                raw_bytes,
-                ..
-            } => {
-                assert_eq!(*piece_num, 12); // E2 pawn
-                assert_eq!(*bytes_consumed, 1); // Single byte move
-                assert_eq!(raw_bytes.len(), 1);
-                assert_eq!(raw_bytes[0], 0xCF);
+            StreamingGameElement::Move { raw } => {
+                assert_eq!(raw.len(), 1);
+                assert_eq!(raw[0], 0xCF);
                 println!(
-                    "✅ Pawn move: piece {} consumed {} bytes",
-                    piece_num, bytes_consumed
+                    "✅ Pawn move: consumed {} bytes",
+                    raw.len()
                 );
             }
             _ => panic!("Expected Move element, got: {:?}", parsed_game.elements[0]),
@@ -73,7 +64,7 @@ mod tests {
             15,   // ENCODE_END_GAME
         ];
 
-        let result = parse_pgn_tags_with_streaming(&game_data);
+        let result = parse_streaming_state(&game_data);
 
         assert!(
             result.is_ok(),
@@ -86,20 +77,13 @@ mod tests {
 
         // Verify Queen diagonal move
         match &parsed_game.elements[0] {
-            StreamingGameElement::Move {
-                piece_num,
-                bytes_consumed,
-                raw_bytes,
-                ..
-            } => {
-                assert_eq!(*piece_num, 4); // Queen
-                assert_eq!(*bytes_consumed, 2); // Two bytes consumed for diagonal move
-                assert_eq!(raw_bytes.len(), 2);
-                assert_eq!(raw_bytes[0], 0x43);
-                assert_eq!(raw_bytes[1], 94);
+            StreamingGameElement::Move { raw } => {
+                assert_eq!(raw.len(), 2);
+                assert_eq!(raw[0], 0x43);
+                assert_eq!(raw[1], 94);
                 println!(
-                    "✅ Queen diagonal move: piece {} consumed {} bytes",
-                    piece_num, bytes_consumed
+                    "✅ Queen diagonal move consumed {} bytes",
+                    raw.len()
                 );
             }
             _ => panic!("Expected Move element, got: {:?}", parsed_game.elements[0]),
@@ -122,7 +106,7 @@ mod tests {
             15, // ENCODE_END_GAME
         ];
 
-        let result = parse_pgn_tags_with_streaming(&game_data);
+        let result = parse_streaming_state(&game_data);
 
         assert!(
             result.is_ok(),
@@ -135,32 +119,22 @@ mod tests {
 
         // Verify elements in order
         match &parsed_game.elements[0] {
-            StreamingGameElement::Move {
-                piece_num,
-                bytes_consumed,
-                ..
-            } => {
-                assert_eq!(*piece_num, 12); // Pawn
-                assert_eq!(*bytes_consumed, 1);
+            StreamingGameElement::Move { raw } => {
+                assert_eq!(raw.len(), 1);
             }
             _ => panic!("Expected pawn move"),
         }
 
         match &parsed_game.elements[1] {
-            StreamingGameElement::Nag { nag_value, .. } => {
-                assert_eq!(*nag_value, 1);
+            StreamingGameElement::Nag { nag_code, .. } => {
+                assert_eq!(*nag_code, 1);
             }
             _ => panic!("Expected NAG"),
         }
 
         match &parsed_game.elements[2] {
-            StreamingGameElement::Move {
-                piece_num,
-                bytes_consumed,
-                ..
-            } => {
-                assert_eq!(*piece_num, 4); // Queen
-                assert_eq!(*bytes_consumed, 2); // Two bytes
+            StreamingGameElement::Move { raw } => {
+                assert_eq!(raw.len(), 2);
             }
             _ => panic!("Expected Queen move"),
         }
@@ -194,7 +168,7 @@ mod tests {
             15,   // ENCODE_END_GAME
         ];
 
-        let result = parse_pgn_tags_with_streaming(&game_data);
+        let result = parse_streaming_state(&game_data);
 
         // The result might be ok or error depending on move validity,
         // but let's check that we can parse the structure
@@ -211,10 +185,10 @@ mod tests {
 
             for element in &parsed_game.elements {
                 match element {
-                    StreamingGameElement::Move { bytes_consumed, .. } => {
-                        total_move_bytes += bytes_consumed;
+                    StreamingGameElement::Move { raw } => {
+                        total_move_bytes += raw.len();
                         move_count += 1;
-                        println!("📊 Move {} consumed {} bytes", move_count, bytes_consumed);
+                        println!("📊 Move {} consumed {} bytes", move_count, raw.len());
                     }
                     StreamingGameElement::GameEnd { .. } => {
                         println!("🏁 Game end reached after {} moves", move_count);
@@ -243,7 +217,7 @@ mod tests {
                // Missing NAG value - should handle gracefully
         ];
 
-        let result = parse_pgn_tags_with_streaming(&game_data);
+        let result = parse_streaming_state(&game_data);
 
         // Should handle error gracefully or return partial results
         if result.is_err() {
@@ -266,7 +240,7 @@ mod tests {
             15,   // ENCODE_END_GAME
         ];
 
-        let result = parse_pgn_tags_with_streaming(&game_data);
+        let result = parse_streaming_state(&game_data);
 
         if result.is_ok() {
             let parsed_game = result.unwrap();
@@ -280,11 +254,11 @@ mod tests {
 
             for element in &parsed_game.elements {
                 match element {
-                    StreamingGameElement::VariationStart { .. } => {
+                    StreamingGameElement::VariationStart { } => {
                         has_variation_start = true;
                         println!("✅ Found variation start marker");
                     }
-                    StreamingGameElement::VariationEnd { .. } => {
+                    StreamingGameElement::VariationEnd { } => {
                         has_variation_end = true;
                         println!("✅ Found variation end marker");
                     }
