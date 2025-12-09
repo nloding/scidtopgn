@@ -325,7 +325,7 @@ let has_promotions = (flags & 0x0002) != 0;      // Contains pawn promotions
 let marked_deleted = (flags & 0x0008) != 0;      // Marked for deletion
 let white_openings = (flags & 0x0010) != 0;      // White opening repertoire
 let black_openings = (flags & 0x0020) != 0;      // Black opening repertoire
-// Bits 6-15: Additional tactical/positional themes
+// Bits 6-15: Additional tactical/positional themes (TBD)
 ```
 
 ---
@@ -534,7 +534,7 @@ Each game record has variable length and contains:
 
 ### Multiple Games Per SG4 File
 
-**CRITICAL**: SCID SG4 files can contain **multiple games** in a single file, not just single games.
+**CRITICAL**: SCID SG4 files contain multiple games accessed via the .si4 index. Each game’s start offset and length are defined in its index entry; parsers must use these to read game data boundaries. Double-null patterns may appear within a single game (e.g., comment terminators) and are not reliable global game separators.
 
 #### Game Organization in SG4 File
 
@@ -552,7 +552,7 @@ errorT GFile::ReadGame (ByteBuffer * bb, uint offset, uint length)
 ```cpp
 // Loop through all games in database (from sc_game.cpp, lines 1000+)
 for (uint i=0; i < db->numGames; i++) {
-    IndexEntry * ie = db->idx->FetchEntry(i);  // Get game 1, 2, 3...
+    IndexEntry * ie = db->idx->FetchEntry(i);  // Get game i
     
     // Read only this specific game
     db->gfile->ReadGame (db->bbuf, ie->GetOffset(), ie->GetLength());
@@ -564,32 +564,12 @@ for (uint i=0; i < db->numGames; i++) {
 
 #### Game Boundary Detection
 
-**Multiple games are separated by:**
-```
-[Game 1 Data][NULL][NULL][Game 2 Data][NULL][NULL][Game 3 Data]...
-```
-
-**Example: five.sg4 with 5 games:**
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Game 1 (bytes 0-125)                                   │
-│ ┌─ PGN Tags (0-125) ─┐                              │
-│ └─ NULL terminator (126) ── NULL (127)                │
-│ ┌─ Game Flags (128)      │                              │
-│ └─ Move Data (129+)      │                              │
-├─────────────────────────────────────────────────────────────┤
-│ Game 2 (bytes 127-251)                                 │
-│ ┌─ PGN Tags (127-250) ──┐                              │
-│ └─ NULL terminator (251) ── NULL (252)                │
-│ ┌─ Game Flags (253)      │                              │
-│ └─ Move Data (254+)      │                              │
-├─────────────────────────────────────────────────────────────┤
-│ Game 3 (bytes 252-445)                                 │
-│ ... and so on...                                          │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Key Pattern**: Each game ends with **2 consecutive null bytes (0x00, 0x00)**
+Parsers should treat each game independently using the index entry’s `offset` and `length`. Within a game, structured parsing drives transitions:
+- Tags: parsed until null terminator (0x00)
+- Flags: 1 byte after tags
+- Optional FEN: present only if non-standard start flag set
+- Elements: moves, NAGs, comments, variation markers
+- End of game: ENCODE_END_GAME (0x0F)
 
 #### SCID's Multi-Game Reading Strategy
 
@@ -618,96 +598,45 @@ for (uint gnum = start; gnum < end; gnum++) {
 
 #### Common Implementation Error
 
-**WRONG**: Treating entire SG4 file as single game
+**WRONG**: Treating entire SG4 file as single game or scanning for double-null as global separators.
 ```rust
-// ❌ INCORRECT - treats file as one large game
+// ❌ INCORRECT - scans whole file and misinterprets annotations as boundaries
 let mut offset = 0;
 loop {
     let byte = self.sg4.mmap[offset];
-    if byte >= ENCODE_FIRST && byte <= ENCODE_LAST {
-        break;  // Wrong: finds annotation in game 1, not game boundary!
-    }
+    if byte == 0x00 && self.sg4.mmap[offset+1] == 0x00 { break; }
     offset += 1;
 }
 ```
 
-**CORRECT**: Parse individual games using game boundaries
+**CORRECT**: Use index entries to read game slices; within the slice, parse tags until null, then flags and elements until ENCODE_END_GAME.
 ```rust
 // ✅ CORRECT SCID approach
-struct GameRecord {
-    offset: u32,    // Start position in SG4 file
-    length: u32,    // Length of game data
-}
-
-impl SG4Parser {
-    fn parse_multi_game_file(&mut self) -> Result<Vec<Game>, Error> {
-        let mut games = Vec::new();
-        
-        // Detect game boundaries (double null terminators)
-        let mut boundaries = self.detect_game_boundaries()?;
-        
-        // Parse each game separately
-        for boundary in boundaries {
-            let game = self.parse_single_game(boundary.start, boundary.length)?;
-            games.push(game);
-        }
-        
-        Ok(games)
-    }
-    
-    fn detect_game_boundaries(&self) -> Result<Vec<GameBoundary>, Error> {
-        // Look for patterns: [data][NULL][NULL][data][NULL][NULL]...
-        let mut boundaries = Vec::new();
-        let mut game_start = 0;
-        let mut prev_null = false;
-        
-        for (i, &byte) in self.sg4.mmap.iter().enumerate() {
-            if byte == 0x00 {
-                if prev_null {
-                    // Found double null = game boundary
-                    boundaries.push(GameBoundary {
-                        start: game_start,
-                        end: i - 1,  // Before first null
-                        length: (i - 1) - game_start,
-                    });
-                    game_start = i + 1;  // After second null
-                    prev_null = false;
-                } else {
-                    prev_null = true;  // First null
-                }
-            } else {
-                prev_null = false;
-            }
-        }
-        
-        Ok(boundaries)
-    }
-}
+let (offset, length) = (index_entry.game_offset, index_entry.game_length);
+let game_bytes = &sg4_data[offset as usize .. (offset + length) as usize];
+let state = parse_streaming_state(game_bytes)?; // Tags→Flags→Elements→EndGame
 ```
 
 #### Real-World Examples
 
 **one.sg4 (1 game):**
 ```
-Bytes 0-60: PGN tags
-Byte 61:    NULL terminator  
-Bytes 62+:  Single game data
+Bytes [offset .. offset+length): game slice from index
+Tags parsed until null terminator
+Flags byte follows
+Moves/annotations parsed until ENCODE_END_GAME
 ```
 
 **five.sg4 (5 games):**
 ```
-Game 1: bytes 0-125, nulls at 126-127, moves 128+
-Game 2: bytes 127-251, nulls at 252-253, moves 254+
-Game 3: bytes 252-445, nulls at 446-447, moves 448+
-Game 4: bytes 446-602, nulls at 603-604, moves 605+
-Game 5: bytes 602-810, nulls at 809-810, moves 811+
+Use five.si4 entries to read 5 independent slices from five.sg4
+Each slice decodes tags→flags→elements→END_GAME
 ```
 
 #### Index File Coordination
 
-**SCID uses separate .si3 index file to track game locations:**
+**SCID uses the .si4 index file to track game locations:**
 ```cpp
-// From SCID index file handling
 struct IndexEntry {
     uint offset;    // Offset to game in .sg4 file
     uint length;    // Length of game data
@@ -716,17 +645,16 @@ struct IndexEntry {
 // Usage in database processing
 for (uint gnum = 0; gnum < db->numGames; gnum++) {
     IndexEntry * ie = db->idx->FetchEntry(gnum);
-    // Use index to find and read each game
     db->gfile->ReadGame(db->bbuf, ie->GetOffset(), ie->GetLength());
     // ... process this game
 }
 ```
 
-**Without index file**: Use double-null detection to find game boundaries.
+**Without index file**: Derive boundaries by parsing structure inside a linear scan, but prefer index when available.
 
 ### Tag Parsing and Game Structure
 
-**CRITICAL IMPLEMENTATION NOTE**: The transition from PGN tags to moves is NOT detected by bytes 11-15, but by structured tag parsing with null byte termination.
+**CRITICAL IMPLEMENTATION NOTE**: The transition from PGN tags to moves is detected by the tags’ null terminator and subsequent flags byte. Bytes 11–15 are semantic elements within the move stream (NAGs, comments, variation markers, end game), not tag/move boundary markers.
 
 #### Tag Section End Detection
 
@@ -757,7 +685,7 @@ static errorT skipTags(ByteBuffer * buf)
 }
 ```
 
-**Key Insight**: Tags end when byte `0` (null terminator) is encountered, NOT when bytes 11-15 are found.
+**Key Insight**: Tags end when byte `0` (null terminator) is encountered.
 
 #### Game Record Parsing Sequence
 
@@ -795,7 +723,7 @@ errorT Game::DecodeStart (ByteBuffer * buf)
 }
 ```
 
-**CRITICAL**: SCID uses structured parsing, NOT byte-range detection.
+**CRITICAL**: SCID uses structured parsing, not byte-range detection.
 
 #### Tag Encoding Rules
 
@@ -841,32 +769,6 @@ let tags_end = skip_tags_until_null(buf)?;
 let game_flags = buf.read_byte()?;
 // Now start parsing moves from this position
 ```
-
-#### Why This Matters
-
-**Real example from one.sg4**:
-```
-Offset 61: 0x6F (Pawn, move_value=15) <- FIRST MOVE (move_value=15: pawn double forward)
-...
-Offset 84: 0x0B (ENCODE_NAG) <- Annotation byte later in game
-```
-
-**Clarification: First Move Context**
-```
-Byte: 0x6F
-Decoding: piece_num=6 (Pawn), move_value=15 (double forward)
-Move: Pawn double forward from starting square
-Result: Could be 1.e4, 1.d4, 1.c4, etc.
-Context: Depends on which pawn and starting position
-Truth: move_value=15 means "double forward" for ANY pawn
-```
-
-**What happens with wrong approach**:
-1. Parser processes bytes 0-83 as "tag data" (incorrectly)
-2. Hits byte 0x0B at offset 84 (ENCODE_NAG = 11)
-3. Since `0x0B >= ENCODE_FIRST(11) && 0x0B <= ENCODE_LAST(15)`, assumes this is end of tags
-4. **WRONG**: `0x0B` is just an annotation byte, not tag section boundary
-5. Starts move parsing at offset 85, missing real first move at offset 61
 
 #### Special Byte Contexts
 
@@ -937,8 +839,6 @@ const ENCODE_END_MARKER: u8 = 14;      // 0x0E
 const ENCODE_END_GAME: u8 = 15;        // 0x0F
 ```
 
-This implementation correctly finds first move at offset 61 (`0x6F` = pawn e2-e4) instead of mistakenly starting at offset 84.
-
 ### Game Data Elements
 
 #### Move Encoding (Piece-Specific Binary Format)
@@ -947,23 +847,13 @@ SCID uses a sophisticated move encoding system based on chess piece characterist
 
 **Basic Move Structure** (1 byte for most moves):
 ```
-Bits 7-4: Piece Number (0-15)    - Identifies which piece moves
-Bits 3-0: Move Value (0-15)      - Piece-specific move encoding
+Bits 7-4: Piece Number (0-15 for side to move)    - Identifies which piece moves
+Bits 3-0: Move Value (0-15)                       - Piece-specific move encoding
 ```
 
-**Piece Number Mapping** (validated from SCID source):
-```
-White Pieces:        Black Pieces:
-0  = King            16 = King  
-1  = Queen           17 = Queen
-2  = Rook (a1)       18 = Rook (a8)
-3  = Bishop (f1)     19 = Bishop (f8)  
-4  = Knight (g1)     20 = Knight (g8)
-5-15 = Pawns         21-31 = Pawns
-9  = Rook (h1)       25 = Rook (h8)
-10 = Bishop (c1)     26 = Bishop (c8)
-11 = Knight (b1)     27 = Knight (b8)
-```
+**Piece Number Semantics**
+- Numbers identify piece instances tracked across the game, not fixed squares. The mapping is relative to the player and updated as pieces move/capture.
+- Typical initial associations (for White) include: King=0, Queen=1, rooks, bishops, knights, pawns distributed across 2–15; Black uses analogous numbering when it is their turn (offset is implicit in side-to-move context).
 
 #### Piece-Specific Move Values
 
@@ -973,7 +863,7 @@ White Pieces:        Black Pieces:
 let king_square_diffs = [0, -9, -8, -7, -1, 1, 7, 8, 9];
 match move_value {
     0 => null_move,         // Special case: no move
-    1-8 => regular_moves,   // 8 adjacent squares
+    1..=8 => regular_moves, // 8 adjacent squares
     10 => kingside_castle,  // O-O
     11 => queenside_castle, // O-O-O
     _ => invalid
@@ -989,21 +879,22 @@ let knight_square_diffs = [0, -17, -15, -10, -6, 6, 10, 15, 17];
 
 **Pawn Moves**:
 ```rust
+// Position-aware: promotions and en passant require legality checks
 match move_value {
     0 => capture_left,         // Diagonal capture  
     1 => move_forward,         // One square forward
     2 => capture_right,        // Diagonal capture
-    3-5 => queen_promotion,    // Promotions with queen
-    6-8 => rook_promotion,     // Promotions with rook
-    9-11 => bishop_promotion,  // Promotions with bishop
-    12-14 => knight_promotion, // Promotions with knight
+    3..=5 => queen_promotion,    // Promotions with queen
+    6..=8 => rook_promotion,     // Promotions with rook
+    9..=11 => bishop_promotion,  // Promotions with bishop
+    12..=14 => knight_promotion, // Promotions with knight
     15 => double_push,         // Two squares forward
 }
 ```
 
 **Rook/Bishop/Queen Moves**:
 - Target square encoded relative to current position
-- May use 2-3 bytes for distant moves
+- May use 2 bytes for queen diagonals (see below)
 - Direction and distance encoded efficiently
 
 #### Special Game Elements
@@ -1084,7 +975,7 @@ ENCODE_NAG(11) 6    // ?! (dubious move)
 
 ### Position-Aware Move Parsing
 
-**Critical Implementation Requirement**: SCID move values are **relative to the current board position**. Accurate parsing requires maintaining complete chess position state throughout the game.
+**Critical Implementation Requirement**: SCID move values are **relative to the current board position**. Accurate parsing requires maintaining complete chess position state throughout the game. En passant and CF-byte ambiguities must be resolved via legality checks.
 
 ```rust
 struct ChessPosition {
@@ -1432,271 +1323,35 @@ fn parse_game_info(bytes: &[u8; 47], names: &Names) -> Result<GameInfo, Box<dyn 
 }
 ```
 
-### Example 2: Position-Aware Move Parsing
+### Example 2: Position-Aware Move Parsing (Streaming)
 
 ```rust
-use std::collections::HashMap;
+use scidtopgn::{parse_streaming_state, StreamingGameElement, SG4Parser, GameState, PgnExporter};
 
-#[derive(Debug)]
-struct ChessPosition {
-    board: [[Option<Piece>; 8]; 8],
-    piece_locations: HashMap<u8, Square>, // SCID piece number -> board square
-    to_move: Color,
-    castling_rights: CastlingRights,
-    en_passant_target: Option<Square>,
-}
-
-impl ChessPosition {
-    fn new() -> Self {
-        let mut position = ChessPosition {
-            board: [[None; 8]; 8],
-            piece_locations: HashMap::new(),
-            to_move: Color::White,
-            castling_rights: CastlingRights::all(),
-            en_passant_target: None,
-        };
-        position.setup_starting_position();
-        position
-    }
+fn parse_game_bytes(game_bytes: &[u8]) -> anyhow::Result<String> {
+    // Parse structured elements (tags → flags → elements → end)
+    let state = parse_streaming_state(game_bytes)?;
     
-    fn setup_starting_position(&mut self) {
-        // Place white pieces with SCID piece numbers
-        self.place_piece(Square::e1(), Piece::new(PieceType::King, Color::White, 0));
-        self.place_piece(Square::d1(), Piece::new(PieceType::Queen, Color::White, 1));
-        self.place_piece(Square::a1(), Piece::new(PieceType::Rook, Color::White, 2));
-        self.place_piece(Square::h1(), Piece::new(PieceType::Rook, Color::White, 9));
-        // ... continue for all pieces
-        
-        // Place black pieces with SCID piece numbers
-        self.place_piece(Square::e8(), Piece::new(PieceType::King, Color::Black, 16));
-        self.place_piece(Square::d8(), Piece::new(PieceType::Queen, Color::Black, 17));
-        // ... continue for all pieces
-    }
-    
-    fn apply_move(&mut self, chess_move: &Move) -> Result<(), String> {
-        // Validate and apply move to position
-        let piece = self.get_piece_at(chess_move.from)
-            .ok_or("No piece at source square")?;
-            
-        // Update board
-        self.board[chess_move.from.rank()][chess_move.from.file()] = None;
-        self.board[chess_move.to.rank()][chess_move.to.file()] = Some(piece);
-        
-        // Update piece tracking
-        self.piece_locations.insert(piece.id, chess_move.to);
-        
-        // Handle special moves (castling, en passant, etc.)
-        if chess_move.is_castling {
-            self.apply_castling_rook_move(chess_move)?;
-        }
-        
-        // Switch turns
-        self.to_move = self.to_move.opposite();
-        
-        Ok(())
-    }
-}
-
-fn parse_game_moves(game_data: &[u8]) -> Result<Vec<Move>, String> {
-    let mut position = ChessPosition::new();
-    let mut moves = Vec::new();
-    let mut pos = 0;
-    
-    while pos < game_data.len() {
-        let byte_val = game_data[pos];
-        pos += 1;
-        
-        match byte_val {
-            0x0F => break, // ENCODE_END_GAME
-            0x0B => {       // ENCODE_NAG
-                let nag_value = game_data[pos];
-                pos += 1;
-                // Process NAG annotation
+    // Maintain position while decoding moves via SG4Parser
+    let mut gs = GameState::default();
+    let mut parser = SG4Parser::default();
+    for el in &state.elements {
+        match el {
+            StreamingGameElement::Move { raw } => {
+                let decoded = parser.decode_single_byte_move(*raw, &gs.position)?;
+                parser.update_position(&mut gs.position, &decoded)?;
             }
-            0x0C => {       // ENCODE_COMMENT
-                // Read null-terminated string
-                let comment_start = pos;
-                while pos < game_data.len() && game_data[pos] != 0 {
-                    pos += 1;
-                }
-                let comment = String::from_utf8_lossy(&game_data[comment_start..pos]);
-                pos += 1; // Skip null terminator
-            }
-            0x0D => {       // ENCODE_START_MARKER (variation start)
-                // Begin variation parsing
-            }
-            0x0E => {       // ENCODE_END_MARKER (variation end)
-                // End variation parsing
-            }
-            _ => {          // Regular move
-                let piece_num = (byte_val >> 4) & 0x0F;
-                let move_value = byte_val & 0x0F;
-                
-                // Parse move using current position
-                let chess_move = decode_scid_move(piece_num, move_value, &position)?;
-                
-                // Apply move to position
-                position.apply_move(&chess_move)?;
-                moves.push(chess_move);
-            }
+            StreamingGameElement::NAG { value } => { /* handle */ }
+            StreamingGameElement::Comment { text } => { /* handle */ }
+            StreamingGameElement::VariationStart | StreamingGameElement::VariationEnd => { /* handle */ }
+            StreamingGameElement::GameEnd => break,
+            _ => {}
         }
     }
     
-    Ok(moves)
-}
-
-fn decode_scid_move(piece_num: u8, move_value: u8, position: &ChessPosition) -> Result<Move, String> {
-    // Map SCID piece number to actual piece (considering turn)
-    let actual_piece_id = if position.to_move == Color::White {
-        piece_num  // White pieces use direct mapping
-    } else {
-        piece_num + 16  // Black pieces offset by 16
-    };
-    
-    let piece = position.get_piece_by_number(actual_piece_id)
-        .ok_or("Piece not found")?;
-    let from_square = position.get_piece_location(actual_piece_id)
-        .ok_or("Piece location not tracked")?;
-    
-    // Decode target square based on piece type and move value
-    let to_square = match piece.piece_type {
-        PieceType::King => decode_king_move(move_value, from_square)?,
-        PieceType::Queen => decode_queen_move(move_value, from_square)?,
-        PieceType::Rook => decode_rook_move(move_value, from_square)?,
-        PieceType::Bishop => decode_bishop_move(move_value, from_square)?,
-        PieceType::Knight => decode_knight_move(move_value, from_square)?,
-        PieceType::Pawn => decode_pawn_move(move_value, from_square, position)?,
-    };
-    
-    Ok(Move::new(from_square, to_square, piece))
-}
-```
-
----
-
-## Validation and Testing
-
-### Test Dataset Validation
-
-For validation, use the included test database:
-
-**File**: `test/data/five.*` (5-game test database)
-
-**Expected Results**:
-- **Version**: 400
-- **Game Count**: 5
-- **Game 1 Date**: 2022.12.19
-- **Player Names**: "Hossain, Enam", "Cheparinov, I", etc.
-- **Event**: "47th ch-Bangahbandhu 2022"
-
-### Validation Checklist
-
-#### Index File (.si4) Validation
-```rust
-fn validate_si4_parsing() {
-    let file = File::open("test/data/five.si4").unwrap();
-    let header = parse_si4_header(file).unwrap();
-    
-    // Header validation
-    assert_eq!(header.version, 400);
-    assert_eq!(header.num_games, 5);
-    assert_eq!(header.description.trim_end_matches('\0'), "Test");
-    
-    // Game entry validation
-    let first_game = parse_game_index_entry(file).unwrap();
-    assert_eq!(first_game.game_date, (2022, 12, 19));
-    assert_eq!(first_game.result, "1/2-1/2");
-    assert_eq!(first_game.white_elo, 2372);
-    assert_eq!(first_game.black_elo, 2419);
-}
-```
-
-#### Name File (.sn4) Validation
-```rust
-fn validate_sn4_parsing() {
-    let file = File::open("test/data/five.sn4").unwrap();
-    let names = parse_all_names(BufReader::new(file)).unwrap();
-    
-    // Player name validation
-    assert_eq!(names.players[0], "Hossain, Enam");
-    assert_eq!(names.players[1], "Cheparinov, I");
-    
-    // Event name validation
-    assert_eq!(names.events[0], "47th ch-Bangahbandhu 2022");
-    
-    // Front-coding validation (names should be complete, not partial)
-    for name in &names.players {
-        assert!(!name.starts_with("ichael")); // Should be "Michael", not "ichael"
-        assert!(name.chars().all(|c| c >= ' ')); // No control characters
-    }
-}
-```
-
-#### Game File (.sg4) Validation
-```rust
-fn validate_sg4_parsing() {
-    let file_data = std::fs::read("test/data/five.sg4").unwrap();
-    let games = parse_all_games(&file_data).unwrap();
-    
-    assert_eq!(games.len(), 5);
-    
-    // Validate first game has reasonable move count
-    let first_game = &games[0];
-    assert!(first_game.moves.len() > 20); // Should have substantial move count
-    assert!(first_game.moves.len() < 200); // But not unreasonably high
-    
-    // Validate move parsing produces legal chess notation
-    for chess_move in &first_game.moves {
-        assert!(chess_move.from != chess_move.to); // Moves should change position
-        assert!(chess_move.notation.len() >= 2); // Should have meaningful notation
-        assert!(!chess_move.notation.contains("P4 V")); // Should not have raw SCID data
-    }
-}
-```
-
-### Cross-Validation Against SCID
-
-```bash
-# Export same database using official SCID
-scid -export pgn test_database.si4 official_output.pgn
-
-# Export using your implementation  
-your_parser test_database.si4 > your_output.pgn
-
-# Compare results
-diff official_output.pgn your_output.pgn
-```
-
-### Performance Benchmarks
-
-```rust
-fn benchmark_parsing_performance() {
-    let start = Instant::now();
-    
-    // Parse index file
-    let index_time = {
-        let start = Instant::now();
-        let games = parse_si4_file("large_database.si4").unwrap();
-        println!("Parsed {} games", games.len());
-        start.elapsed()
-    };
-    
-    // Parse name file
-    let name_time = {
-        let start = Instant::now();
-        let names = parse_sn4_file("large_database.sn4").unwrap();
-        println!("Parsed {} names", names.players.len());
-        start.elapsed()
-    };
-    
-    println!("Index parsing: {:?}", index_time);
-    println!("Name parsing: {:?}", name_time);
-    println!("Total time: {:?}", start.elapsed());
-    
-    // Performance targets for reference:
-    // - Index parsing: ~1M games per second
-    // - Name parsing: ~100K names per second
-    // - Total memory: <100MB for 1M game database
+    // Export PGN from public exporter
+    let exporter = PgnExporter::new(&gs, &state);
+    Ok(exporter.export()?)
 }
 ```
 
@@ -1705,7 +1360,7 @@ fn benchmark_parsing_performance() {
 ## Multi-Byte Move Parsing - FULLY IMPLEMENTED ✅
 
 **Status**: Complete 2-byte Queen diagonal move support implemented  
-**Implementation**: `experiments/scid_parser/src/position/byte_stream.rs` and related modules  
+**Implementation**: `src/formats/sg4.rs` (streaming SG4 parser), `src/position/decoder.rs` (piece-specific decoders), and `src/lib.rs` (public re-exports)  
 **Date**: August 2025
 
 ### Queen Diagonal Moves - Complete Implementation
@@ -1882,8 +1537,8 @@ This specification is based on comprehensive analysis of the official SCID sourc
 
 ### Verification Methodology
 
-**Experiments Framework (August 2025)**:
-- **Location**: `experiments/scid_parser/` - Complete systematic reverse engineering
+**Implementation References (August 2025)**:
+- **Location**: `src/formats/sg4.rs`, `src/position/decoder.rs`, `src/lib.rs`
 - **Approach**: Field-by-field analysis with comprehensive debug output
 - **Validation**: Every implementation cross-checked against SCID source code
 - **Key Discovery**: Big-endian byte order verified through systematic testing
@@ -1891,7 +1546,7 @@ This specification is based on comprehensive analysis of the official SCID sourc
 **Critical Discoveries**:
 1. **Endianness**: All multi-byte values confirmed as big-endian
 2. **Date Format**: Fixed offset 25-28, packed game+event dates
-3. **Piece Numbering**: SCID uses relative piece numbers per player
+3. **Piece Numbering**: Position-tracked identities per side to move (not fixed squares)
 4. **Move Encoding**: Position-dependent values requiring board state
 5. **Variation Structure**: Tree-based with depth tracking
 
@@ -1912,7 +1567,7 @@ This specification is based on comprehensive analysis of the official SCID sourc
 
 ### Implementation Status
 
-**Complete Working Implementation**: `experiments/scid_parser/`
+**Complete Working Implementation**: `src/formats/sg4.rs` and `src/position/decoder.rs`
 - **Position-aware parsing**: 33+ moves successfully parsed from test data
 - **Variation support**: Tree structure implemented and tested
 - **Special moves**: Castling, promotions, captures all working
@@ -1932,4 +1587,4 @@ This documentation represents the most comprehensive and accurate specification 
 
 *Document Version 2.0 - August 2025*  
 *Verified against SCID source code and validated through experiments framework*  
-*Complete implementation available at: `experiments/scid_parser/`*
+*Primary implementation paths: `src/formats/sg4.rs`, `src/position/decoder.rs`, with public API re-exports in `src/lib.rs`*
