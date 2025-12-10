@@ -176,10 +176,9 @@ impl MonitoredPositionTracker {
 
     pub fn try_decode_move_with_monitoring(
         &mut self,
-        stream: &mut ScidByteStream,
+        _stream: &mut ScidByteStream,
     ) -> Result<StreamingGameElement, String> {
         let start_time = Instant::now();
-        let initial_pos = stream.position();
         // Legacy decoder removed; return an error-compatible result for now
         let result: Result<StreamingGameElement, String> = Err::<StreamingGameElement, String>("legacy decoder removed".to_string());
         let decode_duration = start_time.elapsed();

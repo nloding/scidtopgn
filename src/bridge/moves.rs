@@ -939,36 +939,5 @@ mod tests {
 // Diagnostic logging functions for move processing pipeline
 #[cfg(debug_assertions)]
 pub mod diagnostics {
-    use super::*;
-    
-    pub fn log_move_conversion_entry(decoded: &DecodedMove, color: Color) {
-        let piece_type_str = match &decoded.interpretation {
-            MoveInterpretation::King { .. } => "King",
-            MoveInterpretation::Queen { .. } => "Queen", 
-            MoveInterpretation::Rook { .. } => "Rook",
-            MoveInterpretation::Bishop { .. } => "Bishop",
-            MoveInterpretation::Knight { .. } => "Knight",
-            MoveInterpretation::Pawn { .. } => "Pawn",
-            MoveInterpretation::Decoded { piece_type, .. } => piece_type.as_deref().unwrap_or("Unknown"),
-            MoveInterpretation::Unknown { .. } => "Unknown",
-        };
-        
-        eprintln!("[BRIDGE] Converting move: piece_num={}, move_value={}, piece_type={}, color={:?}", 
-                 decoded.piece_num, decoded.move_value, piece_type_str, color);
-    }
-    
-    pub fn log_piece_lookup_attempt(piece_num: u8, expected_type: &str, found_piece: Option<&str>) {
-        match found_piece {
-            Some(found) => eprintln!("[BRIDGE] Piece lookup: piece_num={}, expected={}, found={}", 
-                                   piece_num, expected_type, found),
-            None => eprintln!("[BRIDGE] Piece lookup: piece_num={}, expected={}, found=None", 
-                           piece_num, expected_type),
-        }
-    }
-    
-    pub fn log_converter_entry(converter_name: &str, piece_num: u8, move_value: u8, expected_piece: &str) {
-        eprintln!("[BRIDGE] {} entry: piece_num={}, move_value={}, expected_piece={}", 
-                 converter_name, piece_num, move_value, expected_piece);
-    }
 }
 

@@ -2,7 +2,6 @@ use crate::bridge::{GameState, PositionContext};
 use crate::core::error::{Result, ScidError};
 use crate::formats::sg4::{StreamingGameElement, StreamingGameParseState};
 use crate::bridge::moves::ScidToShakmaty;
-use crate::GameMetadata;  // Import GameMetadata
 use shakmaty::{Chess, Move, Position, san::San};
 use std::collections::HashMap;
 
@@ -349,6 +348,7 @@ mod tests {
     use crate::bridge::GameState;
     use crate::formats::sg4::StreamingGameParseState;
     use std::collections::HashMap;
+    use crate::bridge::GameMetadata;
 
     #[test]
     fn test_pgn_exporter_creation() {

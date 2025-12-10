@@ -61,7 +61,7 @@ pub fn scid_move_to_decoded_move(scid_move: &ScidMove, raw_bytes: &[u8]) -> Deco
 /// This replaces the static try_decode_move function with position-aware decoding
 #[allow(dead_code)]
 pub fn decode_move_with_position(
-    position: &ScidPosition,
+    _position: &ScidPosition,
     raw_byte: u8,
     _offset: usize,
 ) -> Result<DecodedMove, String> {
@@ -109,12 +109,12 @@ impl PositionTracker {
         _offset: usize,
     ) -> Result<DecodedMove, String> {
         let start = stream.position();
-        let raw_byte = match stream.get_byte() {
+        let _ = match stream.get_byte() {
             Ok(b) => b,
             Err(_) => return Err("No byte available in stream".to_string()),
         };
         let result: Result<DecodedMove, String> = Err::<DecodedMove, String>("legacy decoder removed".to_string());
-        let bytes_consumed = stream.position().saturating_sub(start);
+        let _ = stream.position().saturating_sub(start);
         match result {
             Ok(decoded) => {
                 eprintln!("DEBUG: decoded DecodedMove: moving_piece {:?}", decoded.piece_type);
@@ -170,7 +170,7 @@ impl PositionTracker {
     fn last_scid_move_cache(&self, decoded: DecodedMove) -> ScidMove {
         // This is a best-effort reconstruction; for tests we only need move count to advance
         // Use decode_move on raw_byte as fallback
-        let raw = decoded.raw_bytes.first().copied().unwrap_or(0);
+
         match Err::<ScidMove, String>("legacy decoder removed".to_string()) {
             Ok(m) => m,
             Err(_) => ScidMove {

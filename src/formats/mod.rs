@@ -160,21 +160,13 @@ impl ScidDatabase {
                             let byte = data[current_offset];
                             match byte {
                                 15 => {
-                                    // Advance past result byte and stop
-                                    if current_offset + 1 < data.len() {
-                                        current_offset += 2;
-                                    } else {
-                                        current_offset += 1;
-                                    }
+                                    // Result byte encountered; stop parsing moves
                                     break;
                                 }
                                 11 => {
                                     // Skip NAG value
-                                    if current_offset + 1 < data.len() {
-                                        current_offset += 2;
-                                    } else {
-                                        current_offset += 1;
-                                    }
+                                    let advance = if current_offset + 1 < data.len() { 2 } else { 1 };
+                                    current_offset += advance;
                                 }
                                 12 => {
                                     // Skip comment string: length-prefixed

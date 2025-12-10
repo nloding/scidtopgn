@@ -66,7 +66,6 @@
 //! - Minimal allocations during parsing
 
 // Declare internal modules as private
-mod analysis;
 mod bridge;
 pub mod cli;
 pub mod core;

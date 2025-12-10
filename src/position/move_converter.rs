@@ -1,6 +1,4 @@
-use shakmaty::{Chess, Position, EnPassantMode};
-use shakmaty::fen::Fen;
-use shakmaty::Role;
+use shakmaty::{Chess, Position};
 use crate::formats::DecodedMove;
 use crate::core::error::{Result, ScidError};
 use crate::bridge::moves::ScidToShakmaty;
@@ -103,6 +101,9 @@ impl Default for PositionTracker {
 mod tests {
     use super::*;
     use crate::formats::{DecodedMove, MoveInterpretation};
+    use shakmaty::fen::Fen;
+    use shakmaty::EnPassantMode;
+    use shakmaty::Role;
     
     #[test]
     fn test_position_tracker_initialization() {

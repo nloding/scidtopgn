@@ -176,31 +176,6 @@ impl SG4Parser {
         ]
     }
 
-    fn sync_piece_list_with_shakmaty(&mut self) -> std::result::Result<(), EnhancedDecodeError> {
-        if let Some(pos) = &self.current_shakmaty_position {
-            let mut list = [0u8; 16];
-            let mut wi = 0usize;
-            let mut bi = 8usize;
-            for i in 0u32..64u32 {
-                let sq = Square::new(i);
-                if let Some(piece) = pos.board().piece_at(sq) {
-                    let idx = i as u8;
-                    match piece.color { // field access
-                        Color::White => {
-                            if wi < 8 { list[wi] = idx; wi += 1; }
-                        }
-                        Color::Black => {
-                            if bi < 16 { list[bi] = idx; bi += 1; }
-                        }
-                    }
-                }
-            }
-            self.current_piece_list = Some(list);
-            Ok(())
-        } else {
-            Err(EnhancedDecodeError::MissingPosition)
-        }
-    }
 
     fn get_from_square_by_index(&self, piece_num: u8) -> std::result::Result<Square, EnhancedDecodeError> {
         if piece_num >= 16 {
@@ -539,7 +514,6 @@ impl Sg4File {
         Ok(Self { mmap })
     }
     
-    #[allow(dead_code)]
     #[deprecated(note = "Use SG4Parser-based GameIterator for decoding; legacy iterator is obsolete")]
     pub fn iter_games(&self) -> GameIterator<'_> {
         GameIterator {
@@ -548,7 +522,6 @@ impl Sg4File {
         }
     }
     
-    #[allow(dead_code)]
     #[deprecated(note = "Use SG4Parser-driven parsing via GameIterator; get_game is obsolete")]
     pub fn get_game(&self, game_index: usize) -> Result<GameRecord> {
         let mut iterator = self.iter_games();
@@ -563,44 +536,15 @@ impl Sg4File {
     }
     
     /// Get the number of games in the SG4 file
-    #[allow(dead_code)]
     pub fn num_games(&self) -> usize {
         find_game_boundaries(&self.mmap).len()
     }
     
     /// Get the raw data for debugging
-    #[allow(dead_code)]
     pub fn data(&self) -> &[u8] {
         &self.mmap
     }
     
-    #[allow(dead_code)]
-    fn decode_pawn_promotion(&self, move_value: u8) -> Option<String> {
-        match move_value {
-            8 => Some("Queen".to_string()),
-            9 => Some("Rook".to_string()),
-            10 => Some("Bishop".to_string()),
-            11 => Some("Knight".to_string()),
-            _ => None,
-        }
-    }
-    
-    #[cfg(debug_assertions)]
-    fn log_move_interpretation(&self, byte: u8, piece_num: u8, move_value: u8, interpretation: &MoveInterpretation) {
-        let piece_type_str = match interpretation {
-            MoveInterpretation::King { .. } => "King",
-            MoveInterpretation::Queen { .. } => "Queen",
-            MoveInterpretation::Rook { .. } => "Rook",
-            MoveInterpretation::Bishop { .. } => "Bishop",
-            MoveInterpretation::Knight { .. } => "Knight",
-            MoveInterpretation::Pawn { .. } => "Pawn",
-            MoveInterpretation::Decoded { piece_type, .. } => piece_type.as_deref().unwrap_or("Unknown"),
-            MoveInterpretation::Unknown { .. } => "Unknown",
-        };
-        
-        eprintln!("[SG4] byte=0x{:02X}, piece_num={}, move_value={}, piece_type={}", 
-                 byte, piece_num, move_value, piece_type_str);
-    }
 }
 
 pub struct GameRecord {
@@ -812,162 +756,6 @@ impl<'a> GameIterator<'a> {
         Ok(String::from_utf8_lossy(string_bytes).trim_end_matches('\0').to_string())
     }
     
-    #[deprecated(note = "Use SG4Parser-based decoding; this legacy function is obsolete")]
-    fn decode_move_at(&self, offset: &mut usize) -> Result<DecodedMove> {
-        if *offset >= self.sg4.mmap.len() {
-            return Err(ScidError::invalid_format("Move extends beyond file bounds"));
-        }
-        
-        // Legacy path deprecated: use GameIterator with SG4Parser for decoding.
-        // This function now simply returns an error to prevent per-move parser instantiation.
-        Err(ScidError::invalid_format("decode_move_at is deprecated; use GameIterator parser-driven decoding"))
-    }
-    
-    fn decode_single_byte_move(&self, byte: u8, piece_num: u8, move_value: u8, _offset: &mut usize) -> Result<DecodedMove> {
-        let interpretation = match piece_num {
-            1 => self.decode_king_move(move_value),
-            2 => self.decode_queen_move(move_value),
-            3 => self.decode_rook_move(move_value),
-            4 => self.decode_bishop_move(move_value),
-            5 => {
-                eprintln!("DEBUG: SG4 piece_num=5 routing to decode_knight_move, move_value={}", move_value);
-                eprintln!("DEBUG: Algebraic notation: Knight move {}", move_value);
-                self.decode_knight_move(move_value)
-            },
-            6 => {
-                eprintln!("DEBUG: SG4 piece_num=6 routing to decode_pawn_move, move_value={}", move_value);
-                // Special case: move_value 12 for pawn is promotion (like 0x6C)
-                let move_desc = if move_value == 12 {
-                    "Pawn promotion (move_value 12)"
-                } else {
-                    &format!("Pawn move {}", move_value)
-                };
-                eprintln!("DEBUG: Algebraic notation: {}", move_desc);
-                self.decode_pawn_move(move_value)
-            },
-            _ => MoveInterpretation::Unknown {
-                reason: format!("Invalid piece number: {}", piece_num),
-            },
-        };
-        
-        #[cfg(debug_assertions)]
-        self.sg4.log_move_interpretation(byte, piece_num, move_value, &interpretation);
-        
-        // Preserve piece type for correct routing (FIX: extract from interpretation)
-        let piece_type = match &interpretation {
-            MoveInterpretation::King { .. } => Some(Role::King),
-            MoveInterpretation::Queen { .. } => Some(Role::Queen),
-            MoveInterpretation::Rook { .. } => Some(Role::Rook),
-            MoveInterpretation::Bishop { .. } => Some(Role::Bishop),
-            MoveInterpretation::Knight { .. } => Some(Role::Knight),
-            MoveInterpretation::Pawn { .. } => Some(Role::Pawn),
-            MoveInterpretation::Decoded { .. } => None, // This case has separate piece_type field
-            MoveInterpretation::Unknown { .. } => None,
-        };
-        
-        // VALIDATION: Check consistency between piece_num and interpretation
-        if let (Some(ptype), Some(expected_role)) = (piece_type.as_ref(), Self::piece_num_to_role(piece_num)) {
-            if *ptype != expected_role {
-                eprintln!("DEBUG: piece_num/interpretation mismatch - piece_num={} (expected {:?}), interpretation={:?}", 
-                         piece_num, expected_role, ptype);
-            }
-        }
-        
-        // VALIDATION: Check move_value is within valid range for piece type
-        if let (Some(ptype), Some(valid_range)) = (piece_type.as_ref(), Self::valid_move_range(piece_num)) {
-            if move_value > valid_range {
-                eprintln!("DEBUG: move_value {} exceeds valid range {} for piece_type {:?} (piece_num={})", 
-                         move_value, valid_range, ptype, piece_num);
-            }
-        }
-        
-        Ok(DecodedMove {
-            raw_bytes: vec![byte],
-            piece_num,
-            move_value,
-            interpretation,
-            from_square_index: None,
-            to_square_index: None,
-            promotion_piece: None,
-            piece_type,  // Preserved for correct routing
-        })
-    }
-    
-    /// Helper function to map SCID piece numbers to roles for validation
-    /// Maps move encoding numbers (1-6) to piece types
-    /// This is the SG4 piece numbering system, not the board numbering system
-    #[cfg(debug_assertions)]
-    fn piece_num_to_role(piece_num: u8) -> Option<Role> {
-        match piece_num {
-            1 => Some(Role::King),
-            2 => Some(Role::Queen), 
-            3 => Some(Role::Rook),
-            4 => Some(Role::Bishop),
-            5 => Some(Role::Knight),
-            6 => Some(Role::Pawn),
-            _ => None, // Invalid piece numbers
-        }
-    }
-    
-    /// Helper function to get valid move value range for piece types
-    /// Returns maximum valid move value for each piece type
-    /// This helps detect dual numbering system conflicts
-    #[cfg(debug_assertions)]
-    fn valid_move_range(piece_num: u8) -> Option<u8> {
-        match piece_num {
-            1..=6 => Some(15), // Standard pieces: 0-15
-            _ => None, // Invalid piece numbers
-        }
-    }
-    
-    fn decode_king_move(&self, move_value: u8) -> MoveInterpretation {
-        decode_king_move(move_value)
-    }
-    
-    fn decode_queen_move(&self, move_value: u8) -> MoveInterpretation {
-        decode_queen_move(move_value)
-    }
-    
-    fn decode_queen_diagonal_move(&self, first_byte: u8, second_byte: u8, _offset: &mut usize) -> Result<DecodedMove> {
-        let piece_num = (first_byte >> 4) & 0x0F;
-        let move_value = first_byte & 0x0F;
-        let diagonal_info = second_byte & 0x0F;
-        
-        let interpretation = MoveInterpretation::Queen;
-        
-        #[cfg(debug_assertions)]
-        self.sg4.log_move_interpretation(first_byte, piece_num, move_value, &interpretation);
-        
-        // Preserve piece type for correct routing (FIX: extract from interpretation)
-        let piece_type = Some(Role::Queen);
-        
-        Ok(DecodedMove {
-            raw_bytes: vec![first_byte, second_byte],
-            piece_num,
-            move_value,
-            interpretation,
-            from_square_index: None,
-            to_square_index: Some(diagonal_info),
-            promotion_piece: None,
-            piece_type,  // Preserved for correct routing
-        })
-    }
-    
-    fn decode_rook_move(&self, move_value: u8) -> MoveInterpretation {
-        decode_rook_move(move_value)
-    }
-    
-    fn decode_bishop_move(&self, move_value: u8) -> MoveInterpretation {
-        decode_bishop_move(move_value)
-    }
-    
-    fn decode_knight_move(&self, move_value: u8) -> MoveInterpretation {
-        decode_knight_move(move_value)
-    }
-    
-    fn decode_pawn_move(&self, move_value: u8) -> MoveInterpretation {
-        decode_pawn_move(move_value)
-    }
 }
 
 // Constants from SCID source code
@@ -1407,6 +1195,7 @@ fn parse_simple_string(data: &[u8], offset: &mut usize) -> Result<String> {
     }
     
     // Helper function for testing pawn moves
+    #[cfg(test)]
     fn decode_pawn_move_for_test(move_value: u8) -> MoveInterpretation {
         match move_value {
             0 => MoveInterpretation::Pawn {
