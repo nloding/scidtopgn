@@ -9,10 +9,7 @@
 //! Use SG4Parser for indexed single-byte moves and queen diagonal multi-byte moves.
 
 use crate::core::error::{Result, ScidError, EnhancedDecodeError};
-use memmap2::Mmap;
 use shakmaty::{Chess, Position, Role, Color, Square};
-use std::fs::File;
-use std::path::Path;
 
 /// Represents a decoded SCID move with full context information.
 /// 
@@ -65,6 +62,28 @@ pub struct SG4Parser {
     pub current_shakmaty_position: Option<Chess>,
     pub current_piece_list: Option<[u8; 16]>,
     pub position_history: Vec<Chess>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SG4Source {
+    pub bytes: Vec<u8>,
+}
+
+impl SG4Source {
+    pub fn num_games(&self) -> usize {
+        find_game_boundaries(&self.bytes).len()
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub fn iter_games(&self) -> SG4SourceIterator<'_> {
+        SG4SourceIterator {
+            source: self,
+            current_offset: 0,
+        }
+    }
 }
 
 impl SG4Parser {
@@ -413,11 +432,6 @@ pub enum MoveInterpretation {
     },
 }
 
-#[deprecated(note = "Use SG4Parser-based decoding with shakmaty position context")]
-pub struct Sg4File {
-    #[allow(dead_code)]
-    mmap: Mmap,
-}
 
 // Movement decoder helpers available to both SG4Parser and legacy Sg4File
 fn decode_king_move(move_value: u8) -> MoveInterpretation {
@@ -505,47 +519,6 @@ fn decode_pawn_move(move_value: u8) -> MoveInterpretation {
     MoveInterpretation::Pawn { direction: direction.to_string(), promotion, is_en_passant }
 }
 
-impl Sg4File {
-    #[deprecated(note = "Use SG4Parser-based decoding with shakmaty position context")]
-    pub fn open(path: &Path) -> Result<Self> {
-        let file = File::open(path).map_err(|e| ScidError::FileOpen(e, path.to_path_buf()))?;
-        let mmap =
-            unsafe { Mmap::map(&file) }.map_err(|e| ScidError::Mmap(e, path.to_path_buf()))?;
-        Ok(Self { mmap })
-    }
-    
-    #[deprecated(note = "Use SG4Parser-based GameIterator for decoding; legacy iterator is obsolete")]
-    pub fn iter_games(&self) -> GameIterator<'_> {
-        GameIterator {
-            sg4: self,
-            current_offset: 0,
-        }
-    }
-    
-    #[deprecated(note = "Use SG4Parser-driven parsing via GameIterator; get_game is obsolete")]
-    pub fn get_game(&self, game_index: usize) -> Result<GameRecord> {
-        let mut iterator = self.iter_games();
-        
-        for (i, result) in iterator.by_ref().enumerate() {
-            if i == game_index {
-                return result;
-            }
-        }
-        
-        Err(ScidError::invalid_format("Game index out of bounds"))
-    }
-    
-    /// Get the number of games in the SG4 file
-    pub fn num_games(&self) -> usize {
-        find_game_boundaries(&self.mmap).len()
-    }
-    
-    /// Get the raw data for debugging
-    pub fn data(&self) -> &[u8] {
-        &self.mmap
-    }
-    
-}
 
 pub struct GameRecord {
     #[allow(dead_code)]
@@ -563,35 +536,35 @@ pub struct GameRecord {
     pub next_offset: usize,
 }
 
-#[deprecated(note = "Use SG4Parser-based decoding with shakmaty position context")]
-pub struct GameIterator<'a> {
-    sg4: &'a Sg4File,
+
+pub struct SG4SourceIterator<'a> {
+    source: &'a SG4Source,
     current_offset: usize,
 }
 
-impl<'a> Iterator for GameIterator<'a> {
+
+impl<'a> Iterator for SG4SourceIterator<'a> {
     type Item = Result<GameRecord>;
-    
+
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current_offset >= self.sg4.mmap.len() {
+        if self.current_offset >= self.source.bytes.len() {
             return None;
         }
-        
         match self.parse_game_at_offset(self.current_offset) {
             Ok(game_record) => {
                 self.current_offset = game_record.next_offset;
                 Some(Ok(game_record))
             }
             Err(e) => {
-                self.current_offset = self.sg4.mmap.len(); // Stop on error
+                self.current_offset = self.source.bytes.len();
                 Some(Err(e))
             }
         }
     }
 }
 
-impl<'a> GameIterator<'a> {
-    #[deprecated(note = "Legacy parsing path; SG4Parser-based pipeline should be used")]
+
+impl<'a> SG4SourceIterator<'a> {
     fn parse_game_at_offset(&self, offset: usize) -> Result<GameRecord> {
         let mut current_offset = offset;
         let mut tags = Vec::new();
@@ -606,33 +579,29 @@ impl<'a> GameIterator<'a> {
             has_under_promotions: false,
             raw_value: 0,
         };
-        
-        // Parse PGN tags first
+
         let _tags_end_offset = self.parse_pgn_tags(&mut current_offset, &mut tags, &mut flags)?;
-        
-        // Then parse moves and special bytes
-        let mut parser = SG4Parser::new(self.sg4.mmap.to_vec());
+
+        let mut parser = SG4Parser::new(self.source.bytes.clone());
         loop {
-            if current_offset >= self.sg4.mmap.len() {
+            if current_offset >= self.source.bytes.len() {
                 return Err(ScidError::invalid_format("Game extends beyond file bounds"));
             }
-            
-            let byte = self.sg4.mmap[current_offset];
-            
+            let byte = self.source.bytes[current_offset];
             match byte {
                 ENCODE_END_GAME => {
-                    if current_offset + 1 >= self.sg4.mmap.len() {
+                    if current_offset + 1 >= self.source.bytes.len() {
                         return Err(ScidError::invalid_format("Game end extends beyond file bounds"));
                     }
-                    result = Some(self.sg4.mmap[current_offset + 1]);
+                    result = Some(self.source.bytes[current_offset + 1]);
                     current_offset += 2;
                     break;
                 }
                 ENCODE_NAG => {
-                    if current_offset + 1 >= self.sg4.mmap.len() {
+                    if current_offset + 1 >= self.source.bytes.len() {
                         return Err(ScidError::invalid_format("NAG extends beyond file bounds"));
                     }
-                    nags.push(self.sg4.mmap[current_offset + 1]);
+                    nags.push(self.source.bytes[current_offset + 1]);
                     current_offset += 2;
                 }
                 ENCODE_COMMENT => {
@@ -640,15 +609,12 @@ impl<'a> GameIterator<'a> {
                     comments.push(comment);
                 }
                 ENCODE_START_MARKER => {
-                    // Skip variation start marker
                     current_offset += 1;
                 }
                 ENCODE_END_MARKER => {
-                    // Skip variation end marker
                     current_offset += 1;
                 }
                 _ => {
-                    // Regular move via SG4Parser
                     parser.offset = current_offset;
                     let piece_num = (byte >> 4) & 0x0F;
                     let move_value = byte & 0x0F;
@@ -662,21 +628,18 @@ impl<'a> GameIterator<'a> {
                         parser.offset = current_offset;
                         dm
                     };
-                    
-                    // Check for promotions in flags
                     if let MoveInterpretation::Pawn { promotion: Some(promo), .. } = &decoded_move.interpretation {
                         flags.has_promotions = true;
                         if promo != "Queen" {
                             flags.has_under_promotions = true;
                         }
                     }
-                    
                     parser.update_position(&decoded_move).map_err(ScidError::from)?;
                     moves.push(decoded_move);
                 }
             }
         }
-        
+
         Ok(GameRecord {
             tags,
             flags,
@@ -687,39 +650,30 @@ impl<'a> GameIterator<'a> {
             next_offset: current_offset,
         })
     }
-    
+
     fn parse_pgn_tags(&self, offset: &mut usize, tags: &mut Vec<PgnTag>, _flags: &mut GameFlags) -> Result<usize> {
         let _start_offset = *offset;
-        
-        while *offset < self.sg4.mmap.len() {
-            let byte = self.sg4.mmap[*offset];
-            
-            // Check if we've reached the end of tags (start of moves)
+        while *offset < self.source.bytes.len() {
+            let byte = self.source.bytes[*offset];
             if byte >= ENCODE_FIRST && byte <= ENCODE_LAST {
                 break;
             }
-            
-            // Parse tag name and value
             if let Ok((name, value)) = self.parse_tag_at(offset) {
                 tags.push(PgnTag { name, value });
             } else {
                 break;
             }
         }
-        
         Ok(*offset)
     }
-    
+
     fn parse_tag_at(&self, offset: &mut usize) -> Result<(String, String)> {
-        if *offset >= self.sg4.mmap.len() {
+        if *offset >= self.source.bytes.len() {
             return Err(ScidError::invalid_format("Tag extends beyond file bounds"));
         }
-        
-        let tag_byte = self.sg4.mmap[*offset];
+        let tag_byte = self.source.bytes[*offset];
         *offset += 1;
-        
         let (name, value) = if tag_byte >= COMMON_TAG_THRESHOLD {
-            // Common tag encoded as single byte
             let tag_index = (tag_byte - COMMON_TAG_THRESHOLD) as usize;
             if tag_index < COMMON_TAGS.len() {
                 let name = COMMON_TAGS[tag_index].to_string();
@@ -729,33 +683,26 @@ impl<'a> GameIterator<'a> {
                 return Err(ScidError::invalid_format("Invalid common tag byte"));
             }
         } else {
-            // Regular tag name
             let name = self.parse_string_at(offset)?;
             let value = self.parse_string_at(offset)?;
             (name, value)
         };
-        
         Ok((name, value))
     }
-    
+
     fn parse_string_at(&self, offset: &mut usize) -> Result<String> {
-        if *offset >= self.sg4.mmap.len() {
+        if *offset >= self.source.bytes.len() {
             return Err(ScidError::invalid_format("String extends beyond file bounds"));
         }
-        
-        let length = self.sg4.mmap[*offset] as usize;
+        let length = self.source.bytes[*offset] as usize;
         *offset += 1;
-        
-        if *offset + length > self.sg4.mmap.len() {
+        if *offset + length > self.source.bytes.len() {
             return Err(ScidError::invalid_format("String extends beyond file bounds"));
         }
-        
-        let string_bytes = &self.sg4.mmap[*offset..*offset + length];
+        let string_bytes = &self.source.bytes[*offset..*offset + length];
         *offset += length;
-        
         Ok(String::from_utf8_lossy(string_bytes).trim_end_matches('\0').to_string())
     }
-    
 }
 
 // Constants from SCID source code

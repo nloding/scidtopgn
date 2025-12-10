@@ -9,7 +9,7 @@ pub use sg4::{DecodedMove, MoveInterpretation};
 
 use crate::core::error::Result;
 use crate::bridge::position::format_result;
-use crate::formats::sg4::Sg4File;
+use crate::formats::sg4::SG4Source;
 use crate::formats::si4::Si4File;
 use crate::formats::sn4::Sn4File;
 use std::path::{Path, PathBuf};
@@ -57,9 +57,9 @@ pub struct ScidDatabase {
     si4_file: Si4File,
     /// SCID names file containing player and event names
     sn4_file: Sn4File,
-    /// SCID games file containing actual game data
+    /// SCID games source containing actual game data
     #[allow(dead_code)]
-    sg4_file: Sg4File,
+    sg4_source: SG4Source,
     /// Database validation state
     validated: bool,
     /// Base path for reconstructing file paths
@@ -90,12 +90,13 @@ impl ScidDatabase {
         // Open and validate all three SCID files
         let si4_file = Si4File::open(&base_path.with_extension("si4"))?;
         let sn4_file = Sn4File::open(&base_path.with_extension("sn4"))?;
-        let sg4_file = Sg4File::open(&base_path.with_extension("sg4"))?;
+        let sg4_bytes = std::fs::read(&base_path.with_extension("sg4"))?;
+        let sg4_source = crate::formats::sg4::SG4Source { bytes: sg4_bytes };
         
         let mut database = Self {
             si4_file,
             sn4_file,
-            sg4_file,
+            sg4_source,
             validated: false,
             base_path,
         };
@@ -114,14 +115,15 @@ impl ScidDatabase {
         // Check that the number of games matches across files
         let si4_game_count = self.si4_file.num_games();
         
-        // For now, skip sg4 validation as the method doesn't exist yet
-        // TODO: Add sg4 validation when the method is available
+        let sg4_game_count = self.sg4_source.num_games() as u32;
         
         // Validate that all game indices are within bounds
         for i in 0..si4_game_count {
             let _game_index = self.si4_file.get_game(i)?;
-            
-            // TODO: Add sg4 bounds validation when methods are available
+            // Basic consistency check: sg4 should have at least as many games as si4
+            if i >= sg4_game_count {
+                return Err(crate::core::error::ScidError::invalid_format("SG4 games fewer than SI4 indices"));
+            }
         }
         
         Ok(())
@@ -145,9 +147,9 @@ impl ScidDatabase {
         let game_index = self.si4_file.get_game(index)?;
         
         // Decode moves using SG4Parser streaming model; do not fail hard on errors
-        let sg4_path = self.base_path.with_extension("sg4");
         let mut moves: Vec<DecodedMove> = Vec::new();
-        let parsed_game = if let Ok(data) = std::fs::read(&sg4_path) {
+        let parsed_game = {
+            let data = self.sg4_source.data().to_vec();
             // Parse streaming elements (comments, nags, variations, moves)
             match crate::formats::sg4::parse_streaming_state(&data) {
                 Ok(stream_state) => {
@@ -236,11 +238,7 @@ impl ScidDatabase {
                     crate::formats::sg4::StreamingGameParseState::new()
                 }
             }
-        } else {
-            eprintln!("Warning: Could not read SG4 file at {:?}", sg4_path);
-            crate::formats::sg4::StreamingGameParseState::new()
-        };
-        
+        };        
         // Create game state with metadata
         let mut game_state = crate::bridge::GameState::new();
         
@@ -442,7 +440,7 @@ mod tests {
         let _database = ScidDatabase {
             si4_file: Si4File::open(&PathBuf::from("test.si4")).unwrap(),
             sn4_file: Sn4File::open(&PathBuf::from("test.sn4")).unwrap(),
-            sg4_file: Sg4File::open(&PathBuf::from("test.sg4")).unwrap(),
+            sg4_source: SG4Source { bytes: Vec::new() },
             validated: false,
             base_path: PathBuf::from("test"),
         };
@@ -457,7 +455,7 @@ mod tests {
         let database = ScidDatabase {
             si4_file: Si4File::open(&PathBuf::from("test.si4")).unwrap(),
             sn4_file: Sn4File::open(&PathBuf::from("test.sn4")).unwrap(),
-            sg4_file: Sg4File::open(&PathBuf::from("test.sg4")).unwrap(),
+            sg4_source: SG4Source { bytes: Vec::new() },
             validated: false,
             base_path: PathBuf::from("test"),
         };
@@ -471,7 +469,7 @@ mod tests {
         let database = ScidDatabase {
             si4_file: Si4File::open(&PathBuf::from("test.si4")).unwrap(),
             sn4_file: Sn4File::open(&PathBuf::from("test.sn4")).unwrap(),
-            sg4_file: Sg4File::open(&PathBuf::from("test.sg4")).unwrap(),
+            sg4_source: SG4Source { bytes: Vec::new() },
             validated: false,
             base_path: PathBuf::from("test"),
         };
