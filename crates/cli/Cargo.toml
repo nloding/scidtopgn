@@ -1,0 +1,20 @@
+[package]
+name = "scidtopgn"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "CLI tool for converting SCID chess databases to PGN format"
+keywords = ["chess", "scid", "pgn", "cli"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "scidtopgn"
+path = "src/main.rs"
+
+[dependencies]
+scidtopgn-core = { path = "../core" }
+anyhow.workspace = true
+clap.workspace = true

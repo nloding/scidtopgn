@@ -1,49 +1,28 @@
-[package]
-name = "scidtopgn"
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/cli"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 authors = ["Chess Database Converter"]
-description = "A CLI tool to convert SCID databases (.si4/.sg4/.sn4) to PGN format"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/nloding/scidtopgn"
+rust-version = "1.70"
 
-[lib]
-name = "scidtopgn"
-path = "src/lib.rs"
-
-[[bin]]
-name = "scidtopgn"
-path = "src/main.rs"
-
-[dependencies]
-# Chess engine and notation
-shakmaty = "0.26"
-pgn-reader = "0.26"
-# Phase 4.2: Performance optimization dependencies
-lazy_static = "1.4"
-
-# Error handling and utilities
+[workspace.dependencies]
+# Error handling
 thiserror = "1.0"
 anyhow = "1.0"
+
+# Chess logic
+shakmaty = "0.26"
+
+# Binary parsing
+byteorder = "1.5"
+
+# CLI
 clap = { version = "4.5", features = ["derive"] }
-memmap2 = "0.9"
 
-# Performance optimization
-lru = "0.12"
-object-pool = "0.5"
-
-# Property-based testing
-proptest = "1.4"
-# rayon = "1.3.1"  # Requires Rust 1.80+, using std::thread instead
-
-# Optional features
-serde = { version = "1.0", features = ["derive"], optional = true }
-hex = "0.4.3"
-
-
-[features]
-default = []
-serde = ["dep:serde"]
-
-[dev-dependencies]
-assert_cmd = "2.0"
-predicates = "3.0"
+# Testing
+pretty_assertions = "1.4"

@@ -1,0 +1,1 @@
+//! Database-specific type definitions

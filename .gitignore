@@ -32,3 +32,6 @@ before-refactor/
 .docs/
 .claude/
 .shotgun/
+
+# repomix of scidvspc
+repomix-scidvspc.xml

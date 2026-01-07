@@ -1,0 +1,19 @@
+[package]
+name = "scidtopgn-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Library for parsing SCID chess databases and converting to PGN"
+keywords = ["chess", "scid", "pgn", "database", "parser"]
+categories = ["parser-implementations", "data-structures"]
+
+[dependencies]
+thiserror.workspace = true
+shakmaty.workspace = true
+byteorder.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
