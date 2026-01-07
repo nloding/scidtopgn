@@ -11,3 +11,9 @@ pub mod index;
 pub mod names;
 pub mod reader;
 pub mod types;
+
+// Re-exports for convenience
+pub use index::{
+    parse_game_index_entry, parse_si4_file, parse_si4_header, GameIndexEntry, IndexEntryIter,
+    Si4Header, GAME_ENTRY_SIZE, SCID_VERSION, SI4_HEADER_SIZE, SI4_MAGIC,
+};

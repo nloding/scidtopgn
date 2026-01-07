@@ -1,6 +1,8 @@
 //! Core type definitions for SCID database structures
 
 // Re-export shakmaty types for chess operations
+// These will be used in Phase 5 (move parsing) and beyond
+#[allow(unused_imports)]
 pub use shakmaty::{Chess, Color, Move, Piece, Position, Role, Square};
 
 /// Game date representation
