@@ -255,6 +255,44 @@ impl Default for GameIndexEntry {
     }
 }
 
+// Name lookup methods - requires NameDatabase from names.rs
+use super::names::NameDatabase;
+
+impl GameIndexEntry {
+    /// Get white player name from name database
+    pub fn get_white_name<'a>(&self, names: &'a NameDatabase) -> Option<&'a str> {
+        names.get_player(self.white_id)
+    }
+
+    /// Get black player name from name database
+    pub fn get_black_name<'a>(&self, names: &'a NameDatabase) -> Option<&'a str> {
+        names.get_player(self.black_id)
+    }
+
+    /// Get both player names as tuple (white, black)
+    pub fn get_player_names<'a>(
+        &self,
+        names: &'a NameDatabase,
+    ) -> (Option<&'a str>, Option<&'a str>) {
+        (self.get_white_name(names), self.get_black_name(names))
+    }
+
+    /// Get event name from name database
+    pub fn get_event_name<'a>(&self, names: &'a NameDatabase) -> Option<&'a str> {
+        names.get_event(self.event_id)
+    }
+
+    /// Get site name from name database
+    pub fn get_site_name<'a>(&self, names: &'a NameDatabase) -> Option<&'a str> {
+        names.get_site(self.site_id)
+    }
+
+    /// Get round name from name database
+    pub fn get_round_name<'a>(&self, names: &'a NameDatabase) -> Option<&'a str> {
+        names.get_round(self.round_id)
+    }
+}
+
 /// Parse SI4 header from file.
 ///
 /// Reads and validates the 182-byte header from a .si4 file.
