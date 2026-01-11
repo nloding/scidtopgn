@@ -851,51 +851,216 @@ Bits 7-4: Piece Number (0-15 for side to move)    - Identifies which piece moves
 Bits 3-0: Move Value (0-15)                       - Piece-specific move encoding
 ```
 
-**Piece Number Semantics**
-- Numbers identify piece instances tracked across the game, not fixed squares. The mapping is relative to the player and updated as pieces move/capture.
-- Typical initial associations (for White) include: King=0, Queen=1, rooks, bishops, knights, pawns distributed across 2–15; Black uses analogous numbering when it is their turn (offset is implicit in side-to-move context).
+**Piece Number Semantics** (see [Piece List Management](#piece-list-management---the-foundation-of-move-decoding) for full details)
+- Numbers identify piece instances tracked across the game, not fixed squares
+- Standard start: King=0, QR=1, QN=2, QB=3, Q=4, KB=5, KN=6, KR=7, Pawns=8-15
+- **CRITICAL**: Piece numbers change after captures (swap algorithm) - see full documentation below
 
 #### Piece-Specific Move Values
 
-**King Moves** (verified from SCID source):
-```rust
-// Move values 0-11 for kings
-let king_square_diffs = [0, -9, -8, -7, -1, 1, 7, 8, 9];
-match move_value {
-    0 => null_move,         // Special case: no move
-    1..=8 => regular_moves, // 8 adjacent squares
-    10 => kingside_castle,  // O-O
-    11 => queenside_castle, // O-O-O
-    _ => invalid
+**King Moves** (verified from SCID source `game.cpp` lines 59111-59126):
+
+SCID uses square index arithmetic where `square_index = rank * 8 + file` (A1=0, H8=63).
+
+```cpp
+// From SCID decodeKing():
+static const int sqdiff[] = {
+    0, -9, -8, -7, -1, 1, 7, 8, 9, -2, 2
+};
+if (val == 0) {
+    sm->to = sm->from;  // Null move (King stays in place)
+    return OK;
+}
+if (val < 1 || val > 10) { return ERROR_Decode; }  // ONLY values 0-10 valid
+sm->to = sm->from + sqdiff[val];
+```
+
+**King Move Value Table**:
+| Value | sqdiff | Meaning |
+|-------|--------|---------|
+| 0 | 0 | Null move (King to same square) |
+| 1 | -9 | Southwest (rank-1, file-1) |
+| 2 | -8 | South (rank-1) |
+| 3 | -7 | Southeast (rank-1, file+1) |
+| 4 | -1 | West (file-1) |
+| 5 | +1 | East (file+1) |
+| 6 | +7 | Northwest (rank+1, file-1) |
+| 7 | +8 | North (rank+1) |
+| 8 | +9 | Northeast (rank+1, file+1) |
+| 9 | -2 | **Queenside castle (O-O-O)** |
+| 10 | +2 | **Kingside castle (O-O)** |
+| 11-15 | N/A | INVALID - these are PGN annotation markers |
+
+**Critical Notes**:
+- King is ALWAYS piece number 0: `ASSERT(sm->pieceNum == 0)`
+- Values 11-15 (0x0B-0x0F) are NOT king moves - they are annotation markers handled at the game parser layer
+- Null move (value 0) is valid and means "pass" (used in analysis)
+
+**Knight Moves** (verified from SCID source `game.cpp` lines 59149-59160):
+
+```cpp
+// From SCID decodeKnight():
+static const int sqdiff[] = {
+    0, -17, -15, -10, -6, 6, 10, 15, 17
+};
+if (val < 1 || val > 8) { return ERROR_Decode; }  // ONLY values 1-8 valid
+sm->to = sm->from + sqdiff[val];
+```
+
+**Knight Move Value Table**:
+| Value | sqdiff | Meaning |
+|-------|--------|---------|
+| 0 | N/A | INVALID (placeholder in array) |
+| 1 | -17 | 2 ranks down, 1 file left |
+| 2 | -15 | 2 ranks down, 1 file right |
+| 3 | -10 | 1 rank down, 2 files left |
+| 4 | -6 | 1 rank down, 2 files right |
+| 5 | +6 | 1 rank up, 2 files left |
+| 6 | +10 | 1 rank up, 2 files right |
+| 7 | +15 | 2 ranks up, 1 file left |
+| 8 | +17 | 2 ranks up, 1 file right |
+| 9-15 | N/A | INVALID - return ERROR_Decode |
+
+**Note**: Values 0 and 9-15 are invalid for knights. There are exactly 8 possible L-shaped moves.
+
+**Pawn Moves** (verified from SCID source `game.cpp` lines 59284-59348):
+
+SCID uses a lookup table with **color-dependent arithmetic**:
+
+```cpp
+// From SCID decodePawn():
+static const int toSquareDiff [16] = {
+    7,8,9, 7,8,9, 7,8,9, 7,8,9, 7,8,9, 16
+};
+static const pieceT promoPieceFromVal [16] = {
+    EMPTY,EMPTY,EMPTY,                    // 0-2: no promotion
+    QUEEN,QUEEN,QUEEN,                    // 3-5: queen promotion
+    ROOK,ROOK,ROOK,                       // 6-8: rook promotion
+    BISHOP,BISHOP,BISHOP,                 // 9-11: bishop promotion
+    KNIGHT,KNIGHT,KNIGHT,                 // 12-14: knight promotion
+    EMPTY                                 // 15: no promotion (double push)
+};
+
+// CRITICAL: Direction depends on color!
+if (toMove == WHITE) {
+    sm->to = sm->from + toSquareDiff[val];  // White pawns move UP (+)
+} else {
+    sm->to = sm->from - toSquareDiff[val];  // Black pawns move DOWN (-)
+}
+sm->promote = promoPieceFromVal[val];
+```
+
+**Pawn Move Value Table**:
+| Value | toSquareDiff | Promotion | Meaning |
+|-------|--------------|-----------|---------|
+| 0 | 7 | None | Capture (file-1 for White, file+1 for Black) |
+| 1 | 8 | None | Forward one square |
+| 2 | 9 | None | Capture (file+1 for White, file-1 for Black) |
+| 3 | 7 | Queen | Capture-promote (file-1/+1) to Queen |
+| 4 | 8 | Queen | Forward-promote to Queen |
+| 5 | 9 | Queen | Capture-promote (file+1/-1) to Queen |
+| 6 | 7 | Rook | Capture-promote to Rook |
+| 7 | 8 | Rook | Forward-promote to Rook |
+| 8 | 9 | Rook | Capture-promote to Rook |
+| 9 | 7 | Bishop | Capture-promote to Bishop |
+| 10 | 8 | Bishop | Forward-promote to Bishop |
+| 11 | 9 | Bishop | Capture-promote to Bishop |
+| 12 | 7 | Knight | Capture-promote to Knight |
+| 13 | 8 | Knight | Forward-promote to Knight |
+| 14 | 9 | Knight | Capture-promote to Knight |
+| 15 | 16 | None | Double push (two squares forward) |
+
+**Critical: Capture Direction Depends on Color**:
+- **White**: val 0 = capture toward a-file (left), val 2 = capture toward h-file (right)
+- **Black**: val 0 = capture toward h-file (right), val 2 = capture toward a-file (left)
+
+This is because subtracting 7 from a Black pawn's square moves it down-right, not down-left.
+
+**Rook Moves** (verified from SCID source `game.cpp` lines 59162-59177):
+
+```cpp
+// From SCID decodeRook():
+if (val >= 8) {
+    // Vertical move: target rank = val - 8
+    sm->to = square_Make(square_Fyle(sm->from), val - 8);
+} else {
+    // Horizontal move: target file = val
+    sm->to = square_Make(val, square_Rank(sm->from));
 }
 ```
 
-**Knight Moves**:
-```rust  
-// Standard L-shaped moves (values 1-8)
-let knight_square_diffs = [0, -17, -15, -10, -6, 6, 10, 15, 17];
-// Extended values 9-15 for special cases or edge positions
-```
+**Rook Move Value Table**:
+| Value | Meaning |
+|-------|---------|
+| 0-7 | Horizontal move to file a-h (same rank) |
+| 8-15 | Vertical move to rank 1-8 (same file) |
 
-**Pawn Moves**:
-```rust
-// Position-aware: promotions and en passant require legality checks
-match move_value {
-    0 => capture_left,         // Diagonal capture  
-    1 => move_forward,         // One square forward
-    2 => capture_right,        // Diagonal capture
-    3..=5 => queen_promotion,    // Promotions with queen
-    6..=8 => rook_promotion,     // Promotions with rook
-    9..=11 => bishop_promotion,  // Promotions with bishop
-    12..=14 => knight_promotion, // Promotions with knight
-    15 => double_push,         // Two squares forward
+**Bishop Moves** (verified from SCID source `game.cpp` lines 59215-59230):
+
+Bishop uses target file + direction bit encoding:
+
+```cpp
+// From SCID decodeBishop():
+byte fyle = (val & 7);                              // Target file (0-7)
+int fylediff = (int)fyle - (int)square_Fyle(sm->from);
+if (val >= 8) {
+    // Up-left / down-right diagonal
+    sm->to = sm->from - 7 * fylediff;
+} else {
+    // Up-right / down-left diagonal
+    sm->to = sm->from + 9 * fylediff;
 }
 ```
 
-**Rook/Bishop/Queen Moves**:
-- Target square encoded relative to current position
-- May use 2 bytes for queen diagonals (see below)
-- Direction and distance encoded efficiently
+**Bishop Move Value Structure**:
+| Bits | Meaning |
+|------|---------|
+| 0-2 (val & 7) | Target file (0=a, 7=h) |
+| 3 (val & 8) | Diagonal direction: 0=up-right/down-left, 1=up-left/down-right |
+
+**Diagonal Direction Logic**:
+- `val < 8`: Up-right or down-left diagonal (product of rank/file diff is positive)
+- `val >= 8`: Up-left or down-right diagonal (product of rank/file diff is negative)
+
+**Example**: Bishop on D4 (index 27, file 3):
+| Target | val | fylediff | Formula | Result |
+|--------|-----|----------|---------|--------|
+| F6 | 5 | +2 | 27 + 9*2 = 45 | ✓ |
+| B2 | 1 | -2 | 27 + 9*(-2) = 9 | ✓ |
+| B6 | 9 | -2 | 27 - 7*(-2) = 41 | ✓ |
+| F2 | 13 | +2 | 27 - 7*2 = 13 | ✓ |
+
+**Queen Moves** (verified from SCID source `game.cpp` lines 59232-59252):
+
+Queen combines rook-like and bishop-like moves, with a **two-byte encoding for diagonals**:
+
+```cpp
+// From SCID decodeQueen():
+if (val >= 8) {
+    // CASE 1: Vertical move (rook-like, 1 byte)
+    sm->to = square_Make(square_Fyle(sm->from), val - 8);
+} else if (val != square_Fyle(sm->from)) {
+    // CASE 2: Horizontal move (rook-like, 1 byte)
+    sm->to = square_Make(val, square_Rank(sm->from));
+} else {
+    // CASE 3: Diagonal move (bishop-like, 2 bytes!)
+    val = buf->GetByte();  // Read second byte from stream
+    if (val < 64 || val > 127) { return ERROR_Decode; }
+    sm->to = val - 64;     // Target square = second_byte - 64
+}
+```
+
+**Queen Move Cases**:
+| Condition | Move Type | Bytes | Encoding |
+|-----------|-----------|-------|----------|
+| val >= 8 | Vertical | 1 | Target rank = val - 8 |
+| val != from_file | Horizontal | 1 | Target file = val |
+| val == from_file | Diagonal | 2 | Second byte = target_square + 64 |
+
+**Two-Byte Diagonal Encoding**:
+- First byte: piece_num in upper nibble, from_file in lower nibble (signals diagonal)
+- Second byte: target_square + 64 (valid range: 64-127)
+- Target square directly encodes destination (0=A1, 63=H8)
 
 #### Special Game Elements
 
@@ -940,10 +1105,49 @@ Move({Final Move}) END_GAME(15)
 
 #### Comment and NAG Integration
 
-**Comments** are stored as null-terminated UTF-8 strings:
+**Comments use two-part encoding** (verified from SCID source `game.cpp`):
+
+1. **In move data**: `ENCODE_COMMENT (0x0C)` is a marker indicating a comment exists at this position
+2. **At end of game data**: Actual comment text is stored as null-terminated UTF-8 strings in a separate comments section
+
+```cpp
+// From SCID encodeComments() - comments stored AFTER all moves:
+errorT encodeComments (ByteBuffer * buf, moveT * m, uint * count)
+{
+    while (m->marker != END_MARKER) {
+        if (m->comment != NULL) {
+            buf->PutTerminatedString (m->comment);
+            (*count)++;
+        }
+        // ... traverse move tree
+    }
+}
 ```
-ENCODE_COMMENT(12) "Excellent move by Carlsen!\0"
+
+**Game Data Structure**:
 ```
+┌─────────────────────────────────────────────────────────────┐
+│ 1. PGN Tags (null-terminated)                               │
+│ 2. Flags byte                                               │
+│ 3. Optional FEN (if non-standard start)                     │
+│ 4. Move data with markers (0x0B=NAG, 0x0C=comment marker,   │
+│    0x0D=start var, 0x0E=end var, 0x0F=end game)            │
+│ 5. Comments section (null-terminated strings in tree order) │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**NAG Values** (Numeric Annotation Glyphs) are stored inline:
+```
+ENCODE_NAG (0x0B) followed by 1-byte NAG value
+```
+| NAG | Symbol | Meaning |
+|-----|--------|---------|
+| 1 | ! | Good move |
+| 2 | ? | Poor move |
+| 3 | !! | Excellent move |
+| 4 | ?? | Blunder |
+| 5 | !? | Interesting move |
+| 6 | ?! | Dubious move |
 
 ### Important: Opening Diversity
 
@@ -1011,6 +1215,150 @@ fn parse_scid_move(
 ---
 
 ## Critical Implementation Details
+
+### Piece List Management - The Foundation of Move Decoding
+
+SCID tracks piece positions using a sophisticated piece list system. Understanding this is **essential** for correctly decoding moves, especially after captures.
+
+#### Core Data Structures (from SCID `position.h`)
+
+```cpp
+// SCID Position class piece tracking:
+squareT  List[2][16];     // List[color][piece_num] = square
+byte     ListPos[64];     // ListPos[square] = piece_num (reverse lookup)
+byte     Count[2];        // Count[color] = number of active pieces (0-16)
+```
+
+- `List[WHITE][5]` = current square of White's piece #5
+- `ListPos[E4]` = piece number of piece on E4
+- `Count[WHITE]` = how many White pieces are still on the board
+
+#### Standard Starting Position Piece Numbers
+
+When a game starts from the standard position, pieces are numbered in a **fixed order** (from SCID `Position::StdStart()`):
+
+| Piece # | White | Black |
+|---------|-------|-------|
+| 0 | King (E1) | King (E8) |
+| 1 | Rook (A1) | Rook (A8) |
+| 2 | Knight (B1) | Knight (B8) |
+| 3 | Bishop (C1) | Bishop (C8) |
+| 4 | Queen (D1) | Queen (D8) |
+| 5 | Bishop (F1) | Bishop (F8) |
+| 6 | Knight (G1) | Knight (G8) |
+| 7 | Rook (H1) | Rook (H8) |
+| 8 | a-pawn | a-pawn |
+| 9 | b-pawn | b-pawn |
+| 10 | c-pawn | c-pawn |
+| 11 | d-pawn | d-pawn |
+| 12 | e-pawn | e-pawn |
+| 13 | f-pawn | f-pawn |
+| 14 | g-pawn | g-pawn |
+| 15 | h-pawn | h-pawn |
+
+#### FEN Position Initialization
+
+When loading from FEN, pieces are numbered **sequentially in scan order** (A8→H8, A7→H7, ... H1), with one critical exception:
+
+```cpp
+// From SCID Position::AddPiece():
+if (piece_Type(p) == KING) {
+    // King is ALWAYS piece #0 - swap if needed
+    if (Count[c] > 0) {
+        squareT oldsq = List[c][0];
+        List[c][Count[c]] = oldsq;
+        ListPos[oldsq] = Count[c];
+    }
+    List[c][0] = sq;
+    ListPos[sq] = 0;
+} else {
+    ListPos[sq] = Count[c];
+    List[c][Count[c]] = sq;
+}
+Count[c]++;
+```
+
+**Key Rule**: King is ALWAYS piece #0. If other pieces were added first, they get bumped to make room.
+
+#### The Capture Swap Algorithm - CRITICAL
+
+When a piece is captured, SCID does NOT simply remove it from the list. Instead, it **swaps the last piece into the captured piece's slot**:
+
+```cpp
+// From SCID Position::DoSimpleMove() - capture handling:
+if (sm->capturedPiece != EMPTY) {
+    sm->capturedNum = ListPos[sm->capturedSquare];
+    Count[enemy]--;
+    // SWAP: Move last piece into captured slot
+    ListPos[List[enemy][Count[enemy]]] = sm->capturedNum;
+    List[enemy][sm->capturedNum] = List[enemy][Count[enemy]];
+    // ...
+}
+```
+
+**Example - Capture Swap**:
+```
+Before capture (Black has 16 pieces):
+  List[BLACK][11] = D5 (d-pawn)      ← TO BE CAPTURED
+  List[BLACK][15] = H7 (h-pawn)      ← LAST PIECE
+  Count[BLACK] = 16
+
+White captures Black's d-pawn on D5:
+  capturedNum = ListPos[D5] = 11
+  Count[BLACK]-- → Count[BLACK] = 15
+
+  // SWAP: h-pawn takes d-pawn's slot
+  ListPos[H7] = 11                   (h-pawn is now piece #11)
+  List[BLACK][11] = H7               (slot 11 now points to H7)
+
+After capture:
+  List[BLACK][11] = H7 (h-pawn)      ← WAS #15, NOW #11!
+  Count[BLACK] = 15
+```
+
+**Why This Matters**: After ANY capture, the last piece of the opponent's color gets renumbered. Future move bytes for that piece will use its NEW piece number. If your implementation doesn't track this, moves will decode to the wrong piece after the first capture.
+
+#### Promotion Handling
+
+Promotion changes the piece TYPE but NOT the piece NUMBER:
+
+```cpp
+// From SCID DoSimpleMove():
+if (sm->promote != EMPTY) {
+    Material[p]--;
+    RemoveFromBoard(p, from);
+    p = piece_Make(ToMove, sm->promote);  // New piece type
+    Material[p]++;
+    AddToBoard(p, from);
+    // NOTE: List/ListPos unchanged - same piece number!
+}
+```
+
+A pawn that was piece #12 becomes a Queen still as piece #12.
+
+#### Castling Updates
+
+Castling updates BOTH the King and Rook in the piece list:
+
+```cpp
+// From SCID DoSimpleMove() - after king move:
+ListPos[rookto] = ListPos[rookfrom];
+List[ToMove][ListPos[rookto]] = rookto;
+```
+
+Both pieces keep their original piece numbers; only their squares change.
+
+#### Implementation Checklist
+
+To correctly decode SCID moves, your implementation MUST:
+
+1. ✅ Initialize piece numbers correctly (standard vs FEN position)
+2. ✅ Track piece squares as they move
+3. ✅ Implement the capture swap algorithm (last piece → captured slot)
+4. ✅ Preserve piece numbers through promotions
+5. ✅ Update both King and Rook squares on castling
+
+---
 
 ### Endianness - The Most Critical Specification
 
