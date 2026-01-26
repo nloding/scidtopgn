@@ -38,43 +38,68 @@ Phase 5 represents the **critical integration point** where SCID's binary move e
 
 ### SCID Database Format Specification
 
-**Primary Reference**: `SCID_DATABASE_FORMAT.md`
+**Primary Reference**: `SCID_DATABASE_FORMAT.md` (THE BIBLE - verified against SCID source code)
 
 **Critical Sections for Phase 5**:
 
-1. **Move Encoding Overview** (lines 843-899)
+1. **Move Encoding Overview** (Section 4.1)
    - Basic move structure: `[piece_num:4][move_value:4]`
    - Piece-specific encoding schemes
    - Position-dependent value interpretation
+   - Source: game.cpp lines 59061-59094
 
-2. **Piece Number Semantics** (lines 854-857)
-   - Dynamic piece tracking (NOT fixed squares)
-   - Relative to side-to-move
-   - Updated as pieces move/capture
+2. **Piece Number Semantics** (Section 4.1.2)
+   - Pieces numbered by STARTING FILE, not piece type!
+   - Order: King(0), QR(1), QN(2), QB(3), Q(4), KB(5), KN(6), KR(7), Pawns(8-15)
+   - Dynamic tracking updated after each move
+   - Source: game.cpp initPieceList()
 
-3. **King Moves** (lines 860-871)
+3. **King Moves** (Section 4.2.1)
+   - Value 0: NULL MOVE (valid - king stays in place)
    - Values 1-8: Adjacent squares
-   - Value 10: Kingside castling
-   - Value 11: Queenside castling
+   - Value 9: Queenside castling (O-O-O)
+   - Value 10: Kingside castling (O-O)
+   - Values 11-15: INVALID
+   - Source: game.cpp lines 59108-59136
 
-4. **Pawn Moves** (lines 880-894)
-   - Values 0-2: Captures and forward moves
-   - Values 3-14: Promotions (by piece type)
-   - Value 15: Double push
+4. **Knight Moves** (Section 4.2.3)
+   - Values 1-8: L-shaped jumps
+   - Values 0 and 9-15: INVALID
+   - Source: game.cpp lines 59204-59230
 
-5. **Queen Moves** (lines 895-899)
-   - 1-byte: Rook-like moves (vertical/horizontal)
-   - **2-byte**: Diagonal moves (CRITICAL!)
+5. **Bishop Moves** (Section 4.2.4)
+   - Uses fylediff formula: `((val/4)+1) * (val&1 ? -1 : 1)`
+   - NOT direct square encoding!
+   - Source: game.cpp lines 59232-59262
 
-6. **Multi-Byte Move Parsing** (lines 1360-1514)
-   - ByteStream requirement for Queen diagonals
-   - Second byte encoding: `target_square = second_byte - 64`
-   - Validation: second_byte must be in range [64, 127]
+6. **Rook Moves** (Section 4.2.5)
+   - Values 0-7: Horizontal (target file = val)
+   - Values 8-15: Vertical (target rank = val - 8)
+   - Source: game.cpp lines 59183-59195
 
-7. **Position-Aware Parsing** (lines 976-1009)
-   - ChessPosition structure requirements
-   - Piece location tracking
-   - Move validation integration
+7. **Pawn Moves** (Section 4.2.6)
+   - Uses toSquareDiff table: `{7,8,9,7,8,9,7,8,9,7,8,9,7,8,9,16}`
+   - White ADDS offset, Black SUBTRACTS offset
+   - val % 3 = direction (0=left, 1=forward, 2=right)
+   - val / 3 = promotion (0=none, 1=Q, 2=R, 3=B, 4=N, 5=double push)
+   - Source: game.cpp lines 59298-59345
+
+8. **Queen Moves** (Section 4.2.7) - **CRITICAL 2-BYTE ENCODING**
+   - If val >= 8: Vertical move (1 byte)
+   - If val != from_file: Horizontal move (1 byte)
+   - If val == from_file: Diagonal move (2 bytes!) - read second byte
+   - Second byte: target_square = byte - 64 (valid range: 64-127)
+   - Source: game.cpp lines 59264-59282
+
+9. **Capture Swap Algorithm** (Section 4.4)
+   - Last piece fills captured piece's slot
+   - Maintains compact piece list without gaps
+   - Source: position.cpp DoSimpleMove()
+
+10. **FEN Initialization** (Section 4.3)
+    - King ALWAYS gets slot 0 first
+    - Other pieces assigned by board scan order
+    - Source: position.cpp AddPiece()
 
 ### Shakmaty Documentation
 
@@ -107,6 +132,40 @@ fn san(&self, m: &Move) -> San;
 
 ---
 
+## Test Data Reference
+
+### Location and Datasets
+
+All test data is in `tests/data/`. See `IMPLEMENTATION_PLAN.md` → "Test Data" section for complete documentation.
+
+| Dataset | Files | Description |
+|---------|-------|-------------|
+| **one** | `one.si4`, `one.sg4`, `one.sn4` | Single game - basic move decoding |
+| **five** | `five.si4`, `five.sg4`, `five.sn4` | Five games - comprehensive validation |
+
+### PGN ↔ SCID Relationship
+
+Each SCID database was created by importing its corresponding PGN file:
+- `one.pgn` → `one.*` (decoded moves should match PGN movetext)
+- `five.pgn` → `five.*` (decoded moves should match PGN movetext)
+
+### Validation Strategy
+
+1. Parse SCID database and decode all moves
+2. Generate SAN notation using shakmaty
+3. Compare generated movetext against source PGN file
+4. Moves must match exactly (including disambiguation, check notation)
+
+### Expected Values
+
+Games should include standard moves as well as special cases:
+- Castling (O-O, O-O-O)
+- En passant captures
+- Pawn promotions
+- Queen diagonal moves (2-byte encoding)
+
+---
+
 ## Task Breakdown
 
 ### Section 5.1: SCID Position Wrapper
@@ -131,30 +190,40 @@ SCID piece numbers are **side-relative** and **dynamic**:
 - Captures update the mapping (captured piece number becomes invalid)
 - Promotions change piece type but keep the number
 
-**Standard Initial Numbering** (from SCID source code analysis):
+**Standard Initial Numbering** (from SCID source code analysis - src/position.cpp initPieceList()):
+
+**CRITICAL**: Pieces are numbered by their STARTING FILE, not by piece type!
+
 ```
 White pieces (when White to move):
-  0 = King (e1)
-  1 = Queen (d1)
-  2 = Rook (a1)
-  3 = Rook (h1)
-  4 = Bishop (c1)
-  5 = Bishop (f1)
-  6 = Knight (b1)
-  7 = Knight (g1)
-  8-15 = Pawns (a2-h2)
+  0 = King (e1)           // Always slot 0
+  1 = QR - Queen's Rook (a1)
+  2 = QN - Queen's Knight (b1)
+  3 = QB - Queen's Bishop (c1)
+  4 = Q  - Queen (d1)
+  5 = KB - King's Bishop (f1)
+  6 = KN - King's Knight (g1)
+  7 = KR - King's Rook (h1)
+  8-15 = Pawns (a2-h2, files 0-7)
 
 Black pieces (when Black to move):
-  0 = King (e8)
-  1 = Queen (d8)
-  2 = Rook (a8)
-  3 = Rook (h8)
-  4 = Bishop (c8)
-  5 = Bishop (f8)
-  6 = Knight (b8)
-  7 = Knight (g8)
-  8-15 = Pawns (a7-h7)
+  0 = King (e8)           // Always slot 0
+  1 = QR - Queen's Rook (a8)
+  2 = QN - Queen's Knight (b8)
+  3 = QB - Queen's Bishop (c8)
+  4 = Q  - Queen (d8)
+  5 = KB - King's Bishop (f8)
+  6 = KN - King's Knight (g8)
+  7 = KR - King's Rook (h8)
+  8-15 = Pawns (a7-h7, files 0-7)
 ```
+
+**Source Reference**: SCID_DATABASE_FORMAT.md Section 4.1.2, game.cpp lines 59061-59094
+
+**IMPORTANT - FEN Position Initialization**: When initializing from a FEN string (non-standard starting position), pieces are assigned numbers in this priority order:
+1. King ALWAYS gets slot 0 first
+2. Then pieces are assigned by scanning the board rank-by-rank, file-by-file
+3. See SCID_DATABASE_FORMAT.md Section 4.3 for complete algorithm
 
 **Design Decision**: Use `HashMap<u8, Square>` to track piece locations:
 - Key: SCID piece number (0-15)
@@ -174,30 +243,43 @@ Black pieces (when Black to move):
 ```rust
 /// SCID piece number to square mapping
 /// Maintains bidirectional mapping between SCID piece numbers and board squares
+/// CRITICAL: Each color has its own independent 0-15 piece list
 #[derive(Debug, Clone)]
 pub struct PieceNumberMapping {
-    /// Maps SCID piece number to current square (for side to move)
+    /// Maps SCID piece number (0-15) to current square for White
     white_pieces: HashMap<u8, Square>,
+    /// Maps SCID piece number (0-15) to current square for Black
     black_pieces: HashMap<u8, Square>,
+    /// Current piece count for White (decremented on captures)
+    white_count: u8,
+    /// Current piece count for Black (decremented on captures)
+    black_count: u8,
 }
 
 impl PieceNumberMapping {
     /// Initialize from standard starting position
+    ///
+    /// CRITICAL: Pieces are numbered by STARTING FILE, not piece type!
+    /// Order: King(0), QR(1), QN(2), QB(3), Q(4), KB(5), KN(6), KR(7), Pawns(8-15)
+    ///
+    /// Source: SCID_DATABASE_FORMAT.md Section 4.1.2, game.cpp initPieceList()
     pub fn standard_start() -> Self {
         let mut mapping = Self {
             white_pieces: HashMap::with_capacity(16),
             black_pieces: HashMap::with_capacity(16),
+            white_count: 16,  // Standard start: 16 pieces each
+            black_count: 16,
         };
 
-        // White pieces
-        mapping.white_pieces.insert(0, Square::E1);  // King
-        mapping.white_pieces.insert(1, Square::D1);  // Queen
-        mapping.white_pieces.insert(2, Square::A1);  // Rook a1
-        mapping.white_pieces.insert(3, Square::H1);  // Rook h1
-        mapping.white_pieces.insert(4, Square::C1);  // Bishop c1
-        mapping.white_pieces.insert(5, Square::F1);  // Bishop f1
-        mapping.white_pieces.insert(6, Square::B1);  // Knight b1
-        mapping.white_pieces.insert(7, Square::G1);  // Knight g1
+        // White pieces (numbered by starting file position)
+        mapping.white_pieces.insert(0, Square::E1);  // King (always slot 0)
+        mapping.white_pieces.insert(1, Square::A1);  // QR - Queen's Rook
+        mapping.white_pieces.insert(2, Square::B1);  // QN - Queen's Knight
+        mapping.white_pieces.insert(3, Square::C1);  // QB - Queen's Bishop
+        mapping.white_pieces.insert(4, Square::D1);  // Q  - Queen
+        mapping.white_pieces.insert(5, Square::F1);  // KB - King's Bishop
+        mapping.white_pieces.insert(6, Square::G1);  // KN - King's Knight
+        mapping.white_pieces.insert(7, Square::H1);  // KR - King's Rook
 
         // White pawns (a2-h2 = piece numbers 8-15)
         for file in 0..8 {
@@ -207,15 +289,15 @@ impl PieceNumberMapping {
             ));
         }
 
-        // Black pieces
-        mapping.black_pieces.insert(0, Square::E8);  // King
-        mapping.black_pieces.insert(1, Square::D8);  // Queen
-        mapping.black_pieces.insert(2, Square::A8);  // Rook a8
-        mapping.black_pieces.insert(3, Square::H8);  // Rook h8
-        mapping.black_pieces.insert(4, Square::C8);  // Bishop c8
-        mapping.black_pieces.insert(5, Square::F8);  // Bishop f8
-        mapping.black_pieces.insert(6, Square::B8);  // Knight b8
-        mapping.black_pieces.insert(7, Square::G8);  // Knight g8
+        // Black pieces (numbered by starting file position)
+        mapping.black_pieces.insert(0, Square::E8);  // King (always slot 0)
+        mapping.black_pieces.insert(1, Square::A8);  // QR - Queen's Rook
+        mapping.black_pieces.insert(2, Square::B8);  // QN - Queen's Knight
+        mapping.black_pieces.insert(3, Square::C8);  // QB - Queen's Bishop
+        mapping.black_pieces.insert(4, Square::D8);  // Q  - Queen
+        mapping.black_pieces.insert(5, Square::F8);  // KB - King's Bishop
+        mapping.black_pieces.insert(6, Square::G8);  // KN - King's Knight
+        mapping.black_pieces.insert(7, Square::H8);  // KR - King's Rook
 
         // Black pawns (a7-h7 = piece numbers 8-15)
         for file in 0..8 {
@@ -228,22 +310,61 @@ impl PieceNumberMapping {
         mapping
     }
 
-    /// Initialize from FEN position
+    /// Initialize from FEN position (non-standard starting position)
+    ///
+    /// CRITICAL: From SCID_DATABASE_FORMAT.md Section 4.3, position.cpp AddPiece():
+    ///
+    /// King is ALWAYS assigned slot 0 first, regardless of board position!
+    /// Then remaining pieces are assigned by scanning rank-by-rank, file-by-file.
+    ///
+    /// Algorithm:
+    /// 1. Find King and assign it slot 0
+    /// 2. Scan board from a1 to h8 (rank 1 to 8, file a to h)
+    /// 3. Assign each piece found the next available slot number
+    /// Initialize from FEN position (non-standard starting position)
+    ///
+    /// CRITICAL: From SCID_DATABASE_FORMAT.md Section 4.3, position.cpp AddPiece():
+    ///
+    /// King is ALWAYS assigned slot 0 first, regardless of board position!
+    /// Then remaining pieces are assigned by scanning rank-by-rank, file-by-file
+    /// in FEN order (rank 8 down to rank 1).
     pub fn from_position(chess: &Chess) -> Result<Self> {
         let mut mapping = Self {
             white_pieces: HashMap::new(),
             black_pieces: HashMap::new(),
+            white_count: 0,
+            black_count: 0,
         };
 
-        // Assign piece numbers based on piece type and square
-        // Priority: King, Queen, Rooks, Bishops, Knights, Pawns
-        let mut white_num = 0u8;
-        let mut black_num = 0u8;
+        // STEP 1: King ALWAYS gets slot 0 first
+        for square in chess.board().by_role(Role::King) {
+            if let Some(piece) = chess.board().piece_at(square) {
+                if piece.color == Color::White {
+                    mapping.white_pieces.insert(0, square);
+                } else {
+                    mapping.black_pieces.insert(0, square);
+                }
+            }
+        }
 
-        // Helper to assign piece numbers in standard order
-        for role in [Role::King, Role::Queen, Role::Rook, Role::Bishop, Role::Knight, Role::Pawn] {
-            for square in chess.board().by_role(role) {
+        // STEP 2: Scan board in FEN order (rank 8 down to rank 1, file a to h)
+        let mut white_num = 1u8;  // Start at 1 (0 is King)
+        let mut black_num = 1u8;
+
+        // Scan from rank 8 (index 7) DOWN to rank 1 (index 0) - FEN order
+        for rank in (0..8u32).rev() {
+            for file in 0..8u32 {
+                let square = Square::from_coords(
+                    shakmaty::File::new(file),
+                    shakmaty::Rank::new(rank)
+                );
+
                 if let Some(piece) = chess.board().piece_at(square) {
+                    // Skip Kings (already assigned slot 0)
+                    if piece.role == Role::King {
+                        continue;
+                    }
+
                     if piece.color == Color::White {
                         mapping.white_pieces.insert(white_num, square);
                         white_num += 1;
@@ -254,6 +375,10 @@ impl PieceNumberMapping {
                 }
             }
         }
+
+        // Set piece counts (white_num and black_num are now actual counts)
+        mapping.white_count = white_num;
+        mapping.black_count = black_num;
 
         Ok(mapping)
     }
@@ -267,53 +392,126 @@ impl PieceNumberMapping {
     }
 
     /// Update mapping after a move
+    ///
+    /// CRITICAL: Implements SCID's capture swap algorithm!
+    /// From SCID_DATABASE_FORMAT.md Section 4.4, position.cpp DoSimpleMove():
+    ///
+    /// When a piece is captured:
+    /// 1. The captured piece's slot becomes empty
+    /// 2. The LAST piece in the list takes the captured piece's slot number
+    /// 3. This maintains a compact piece list without gaps
+    ///
+    /// Example: If piece 3 captures piece on slot 5 (opponent has 8 pieces):
+    /// - Opponent's piece 5 is removed
+    /// - Opponent's piece 7 (the last) moves to slot 5
+    /// - Opponent now has 7 pieces (slots 0-6)
     pub fn update_after_move(&mut self, chess_move: &Move, color: Color) {
-        let pieces = match color {
+        // Handle captures FIRST (before updating moving piece)
+        if chess_move.is_capture() {
+            // Determine capture square (different for en passant!)
+            let capture_square = if chess_move.is_en_passant() {
+                // En passant: captured pawn is NOT on the target square
+                // It's on the same file as target, but same rank as moving pawn
+                let target = chess_move.to();
+                let ep_rank = match color {
+                    Color::White => shakmaty::Rank::Fifth,   // Capturing on rank 6, pawn was on rank 5
+                    Color::Black => shakmaty::Rank::Fourth,  // Capturing on rank 3, pawn was on rank 4
+                };
+                Square::from_coords(target.file(), ep_rank)
+            } else {
+                chess_move.to()
+            };
+
+            // Get enemy pieces and count
+            let (enemy_pieces, enemy_count) = match color {
+                Color::White => (&mut self.black_pieces, &mut self.black_count),
+                Color::Black => (&mut self.white_pieces, &mut self.white_count),
+            };
+
+            // Find the captured piece's slot number
+            let captured_slot = enemy_pieces.iter()
+                .find(|(_, &sq)| sq == capture_square)
+                .map(|(&num, _)| num);
+
+            if let Some(captured_num) = captured_slot {
+                // SCID SWAP ALGORITHM (from position.cpp DoSimpleMove lines 78903-78912):
+                // 1. Decrement enemy piece count
+                *enemy_count -= 1;
+
+                // 2. Get the last piece slot (index = new count)
+                let last_slot = *enemy_count;
+
+                // 3. If captured piece wasn't the last, swap
+                if captured_num != last_slot {
+                    // Move last piece to captured slot
+                    if let Some(&last_square) = enemy_pieces.get(&last_slot) {
+                        enemy_pieces.insert(captured_num, last_square);
+                    }
+                }
+
+                // 4. Remove the last slot
+                enemy_pieces.remove(&last_slot);
+            }
+        }
+
+        // Get own pieces for updating moving piece location
+        let own_pieces = match color {
             Color::White => &mut self.white_pieces,
             Color::Black => &mut self.black_pieces,
         };
 
-        // Find piece number that moved from this square
-        if let Some(from_square) = chess_move.from() {
-            let piece_num = pieces.iter()
-                .find(|(_, &sq)| sq == from_square)
-                .map(|(&num, _)| num);
+        // Update moving piece location based on move type
+        match chess_move {
+            Move::Normal { from, to, .. } => {
+                // Find which piece number is at from square
+                let piece_num = own_pieces.iter()
+                    .find(|(_, &sq)| sq == *from)
+                    .map(|(&num, _)| num);
 
-            if let Some(num) = piece_num {
-                // Update to new square
-                pieces.insert(num, chess_move.to());
-
-                // Handle captures (remove captured piece from opponent mapping)
-                if chess_move.is_capture() {
-                    let opponent_pieces = match color {
-                        Color::White => &mut self.black_pieces,
-                        Color::Black => &mut self.white_pieces,
-                    };
-
-                    opponent_pieces.retain(|_, &sq| sq != chess_move.to());
+                if let Some(num) = piece_num {
+                    own_pieces.insert(num, *to);
                 }
-
-                // Handle promotions (piece type changes but number stays same)
-                // Shakmaty handles this in the Move type
+                // Note: Promotion doesn't change piece NUMBER, only type
             }
-        }
-
-        // Handle castling (move rook)
-        if let Move::Castle { king, rook } = chess_move {
-            // King already moved above
-            // Find and move rook
-            let rook_num = pieces.iter()
-                .find(|(_, &sq)| sq == *rook)
-                .map(|(&num, _)| num);
-
-            if let Some(num) = rook_num {
-                // Rook moves to square between king's start and end
-                let rook_to = if rook.file() > king.file() {
-                    Square::from_coords(shakmaty::File::F, king.rank())
+            Move::Castle { king, rook } => {
+                // King moves to standard castling square
+                let king_to = if rook.file() > king.file() {
+                    Square::from_coords(shakmaty::File::G, king.rank())  // Kingside
                 } else {
-                    Square::from_coords(shakmaty::File::D, king.rank())
+                    Square::from_coords(shakmaty::File::C, king.rank())  // Queenside
                 };
-                pieces.insert(num, rook_to);
+
+                // Rook moves to standard castling square
+                let rook_to = if rook.file() > king.file() {
+                    Square::from_coords(shakmaty::File::F, king.rank())  // Kingside
+                } else {
+                    Square::from_coords(shakmaty::File::D, king.rank())  // Queenside
+                };
+
+                // Update king (always piece 0)
+                own_pieces.insert(0, king_to);
+
+                // Find and update rook
+                let rook_num = own_pieces.iter()
+                    .find(|(_, &sq)| sq == *rook)
+                    .map(|(&num, _)| num);
+
+                if let Some(num) = rook_num {
+                    own_pieces.insert(num, rook_to);
+                }
+            }
+            Move::EnPassant { from, to } => {
+                let piece_num = own_pieces.iter()
+                    .find(|(_, &sq)| sq == *from)
+                    .map(|(&num, _)| num);
+
+                if let Some(num) = piece_num {
+                    own_pieces.insert(num, *to);
+                }
+                // Capture was already handled above
+            }
+            Move::Put { .. } => {
+                // Crazyhouse - not supported in standard SCID
             }
         }
     }
@@ -326,15 +524,21 @@ impl PieceNumberMapping {
 fn test_standard_piece_numbering() {
     let mapping = PieceNumberMapping::standard_start();
 
-    // Verify White pieces
+    // Verify White pieces (ordered by starting file, not piece type!)
     assert_eq!(mapping.get_square(0, Color::White), Some(Square::E1)); // King
-    assert_eq!(mapping.get_square(1, Color::White), Some(Square::D1)); // Queen
+    assert_eq!(mapping.get_square(1, Color::White), Some(Square::A1)); // QR (Queen's Rook)
+    assert_eq!(mapping.get_square(2, Color::White), Some(Square::B1)); // QN (Queen's Knight)
+    assert_eq!(mapping.get_square(3, Color::White), Some(Square::C1)); // QB (Queen's Bishop)
+    assert_eq!(mapping.get_square(4, Color::White), Some(Square::D1)); // Q (Queen)
+    assert_eq!(mapping.get_square(5, Color::White), Some(Square::F1)); // KB (King's Bishop)
+    assert_eq!(mapping.get_square(6, Color::White), Some(Square::G1)); // KN (King's Knight)
+    assert_eq!(mapping.get_square(7, Color::White), Some(Square::H1)); // KR (King's Rook)
     assert_eq!(mapping.get_square(8, Color::White), Some(Square::A2)); // a-pawn
     assert_eq!(mapping.get_square(15, Color::White), Some(Square::H2)); // h-pawn
 
     // Verify Black pieces
     assert_eq!(mapping.get_square(0, Color::Black), Some(Square::E8)); // King
-    assert_eq!(mapping.get_square(1, Color::Black), Some(Square::D8)); // Queen
+    assert_eq!(mapping.get_square(4, Color::Black), Some(Square::D8)); // Queen (slot 4, not 1!)
 }
 
 #[test]
@@ -574,10 +778,13 @@ mod tests {
         // White king should be at e1 (piece number 0)
         assert_eq!(pos.get_piece_square(0), Some(Square::E1));
 
-        // White queen should be at d1 (piece number 1)
-        assert_eq!(pos.get_piece_square(1), Some(Square::D1));
+        // White QR (Queen's Rook) should be at a1 (piece number 1)
+        assert_eq!(pos.get_piece_square(1), Some(Square::A1));
 
-        // White e-pawn should be at e2 (piece number 12)
+        // White Queen should be at d1 (piece number 4, NOT 1!)
+        assert_eq!(pos.get_piece_square(4), Some(Square::D1));
+
+        // White e-pawn should be at e2 (piece number 12 = 8 + e-file(4))
         assert_eq!(pos.get_piece_square(12), Some(Square::E2));
     }
 
@@ -655,6 +862,285 @@ test parser::position::tests::test_illegal_move_rejected ... ok
 
 test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
+
+---
+
+#### Task 5.1.3: Chess960 (Fischer Random Chess) Support
+
+**Objective**: Support Chess960/FRC positions when parsing games with non-standard starting positions.
+
+**Reference**: IMPLEMENTATION_PLAN.md Phase 5.1.1, SCID_DATABASE_FORMAT.md Section 4.3
+
+**Background Education**:
+
+Chess960 (also known as Fischer Random Chess or FRC) uses the same pieces as standard chess but with randomized starting positions for the back rank pieces. Key differences:
+
+1. **960 possible starting positions** (hence the name)
+2. **Castling rules differ**: King and Rook still move to standard squares (c1/g1 for White), but can start on different files
+3. **FEN notation**: Castling rights use file letters (e.g., "AHah") instead of "KQkq" when pieces don't start on standard squares
+
+**Why SCID's Encoding Works for Both**:
+
+SCID's castling encoding (King move values 9 and 10) specifies the **destination squares** (C1/G1 for White, C8/G8 for Black), NOT the rook's starting position. This works for both standard chess AND Chess960 because:
+
+- Standard chess: King e1→g1 (O-O), Rook h1→f1
+- Chess960: King (wherever)→g1, Rook (wherever)→f1
+
+The destination is always the same; only the starting position varies.
+
+**Acceptance Criteria**:
+- [ ] Detect Chess960 positions from FEN castling rights
+- [ ] Use shakmaty's `CastlingMode::Chess960` for FRC positions
+- [ ] Auto-detect function chooses correct mode based on FEN
+- [ ] Castling decoding works for both standard and Chess960
+- [ ] Tests cover Chess960 edge cases
+
+**Implementation**:
+
+Add to `crates/core/src/parser/position.rs`:
+
+```rust
+use shakmaty::{Chess, CastlingMode, fen::Fen};
+
+/// Detect if a FEN string represents a Chess960 position
+///
+/// Chess960 FENs use file letters for castling rights (e.g., "AHah")
+/// when the king or rooks don't start on standard squares.
+/// Standard chess uses "KQkq" notation.
+///
+/// Detection rules:
+/// - If castling field contains any lowercase letter a-h: Chess960
+/// - If castling field is "-" or contains only K/Q/k/q: Standard
+///
+/// # Arguments
+///
+/// * `fen` - Complete FEN string
+///
+/// # Returns
+///
+/// `true` if this appears to be a Chess960 position
+///
+/// # Examples
+///
+/// ```
+/// // Standard chess
+/// assert!(!is_chess960_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"));
+///
+/// // Chess960 with rook on a-file, king on c-file
+/// assert!(is_chess960_fen("rnbkqbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBKQBNR w ACac - 0 1"));
+/// ```
+pub fn is_chess960_fen(fen: &str) -> bool {
+    // FEN has 6 space-separated fields; castling rights is field 3 (index 2)
+    let parts: Vec<&str> = fen.split_whitespace().collect();
+
+    if parts.len() < 3 {
+        return false;  // Invalid FEN, assume standard
+    }
+
+    let castling_field = parts[2];
+
+    // Check for file-based castling rights (Chess960 indicator)
+    // Standard uses only K, Q, k, q, or -
+    // Chess960 uses file letters: A-H for white, a-h for black
+    for c in castling_field.chars() {
+        match c {
+            'K' | 'Q' | 'k' | 'q' | '-' => continue,  // Standard notation
+            'A'..='H' | 'a'..='h' => return true,      // Chess960 notation
+            _ => continue,  // Ignore unexpected characters
+        }
+    }
+
+    false  // No Chess960 indicators found
+}
+
+impl ScidPosition {
+    /// Create position from FEN with automatic Chess960 detection
+    ///
+    /// Examines the FEN's castling rights field to determine whether
+    /// to use standard or Chess960 mode. This ensures correct castling
+    /// validation for both game types.
+    ///
+    /// # Arguments
+    ///
+    /// * `fen` - FEN string (standard or Chess960)
+    ///
+    /// # Returns
+    ///
+    /// ScidPosition configured for the correct game variant
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// // Standard position - uses CastlingMode::Standard
+    /// let pos = ScidPosition::from_fen_auto(
+    ///     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    /// )?;
+    ///
+    /// // Chess960 position - uses CastlingMode::Chess960
+    /// let pos = ScidPosition::from_fen_auto(
+    ///     "rnbkqbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBKQBNR w ACac - 0 1"
+    /// )?;
+    /// ```
+    pub fn from_fen_auto(fen: &str) -> Result<Self> {
+        let is_960 = is_chess960_fen(fen);
+
+        let castling_mode = if is_960 {
+            CastlingMode::Chess960
+        } else {
+            CastlingMode::Standard
+        };
+
+        // Parse FEN with appropriate castling mode
+        let parsed_fen: Fen = fen.parse()
+            .map_err(|e| ScidError::ParseError {
+                file: "position".into(),
+                offset: 0,
+                message: format!("Invalid FEN: {:?}", e),
+            })?;
+
+        let chess = parsed_fen.into_position(castling_mode)
+            .map_err(|e| ScidError::ParseError {
+                file: "position".into(),
+                offset: 0,
+                message: format!("Invalid position: {:?}", e),
+            })?;
+
+        let piece_mapping = PieceNumberMapping::from_position(&chess)?;
+
+        Ok(ScidPosition {
+            chess,
+            piece_mapping,
+        })
+    }
+
+    /// Create position from FEN (convenience alias for from_fen_auto)
+    ///
+    /// This is the recommended method for parsing FEN strings as it
+    /// automatically handles both standard and Chess960 positions.
+    pub fn from_fen(fen: &str) -> Result<Self> {
+        Self::from_fen_auto(fen)
+    }
+}
+```
+
+**Castling Decoding Note**:
+
+The existing `decode_king_move()` function already works correctly for Chess960 because SCID encodes the **destination**, not the path:
+
+```rust
+// From decode_king_move() - NO CHANGES NEEDED for Chess960!
+} else if move_value == 9 {
+    // Queenside castle (O-O-O) - King moves to c-file
+    // Works for BOTH standard and Chess960!
+    match color {
+        Color::White => Square::C1,  // King ends here regardless of start
+        Color::Black => Square::C8,
+    }
+} else if move_value == 10 {
+    // Kingside castle (O-O) - King moves to g-file
+    match color {
+        Color::White => Square::G1,  // King ends here regardless of start
+        Color::Black => Square::G8,
+    }
+}
+```
+
+**Testing**:
+
+```rust
+#[cfg(test)]
+mod chess960_tests {
+    use super::*;
+
+    #[test]
+    fn test_detect_standard_fen() {
+        // Standard starting position
+        assert!(!is_chess960_fen(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        ));
+
+        // Standard with some castling rights lost
+        assert!(!is_chess960_fen(
+            "r1bqkb1r/pppp1ppp/2n2n2/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 4 4"
+        ));
+
+        // No castling rights
+        assert!(!is_chess960_fen(
+            "8/8/8/8/8/8/8/4K2k w - - 0 1"
+        ));
+    }
+
+    #[test]
+    fn test_detect_chess960_fen() {
+        // Chess960 with file-based castling (king on c-file, rooks on a and h)
+        assert!(is_chess960_fen(
+            "rnbkqbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBKQBNR w AHah - 0 1"
+        ));
+
+        // Chess960 with only some castling rights
+        assert!(is_chess960_fen(
+            "rnbkqbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBKQBNR w Hh - 0 1"
+        ));
+
+        // Mixed notation (still Chess960 if any file letter present)
+        assert!(is_chess960_fen(
+            "rnbkqbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBKQBNR w KQah - 0 1"
+        ));
+    }
+
+    #[test]
+    fn test_from_fen_auto_standard() {
+        let pos = ScidPosition::from_fen_auto(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        ).unwrap();
+
+        // Verify standard starting position
+        assert_eq!(pos.turn(), Color::White);
+        assert_eq!(pos.get_piece_square(0), Some(Square::E1));  // White King
+    }
+
+    #[test]
+    fn test_from_fen_auto_chess960() {
+        // Chess960 position #518 (standard-like but with different internal handling)
+        // King on e-file, Rooks on a and h (same as standard visually)
+        let pos = ScidPosition::from_fen_auto(
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w HAha - 0 1"
+        );
+
+        // Should parse successfully with Chess960 mode
+        assert!(pos.is_ok());
+    }
+
+    #[test]
+    fn test_chess960_castling_decoding() {
+        // Chess960 position where king can castle
+        // This tests that our castling decoder works for Chess960
+        let fen = "r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w AHah - 0 1";
+        let pos = ScidPosition::from_fen_auto(fen).unwrap();
+
+        // King should be at e1 (assuming this 960 position)
+        // The key test is that castling rights are properly recognized
+        assert!(pos.castling_rights().contains(Square::A1) ||
+                pos.castling_rights().contains(Square::H1));
+    }
+}
+```
+
+**Validation Commands**:
+```bash
+cargo test chess960_tests
+cargo test test_detect_standard_fen
+cargo test test_detect_chess960_fen
+cargo test test_from_fen_auto_standard
+cargo test test_from_fen_auto_chess960
+```
+
+**Key Points**:
+
+1. **Auto-detection is seamless**: `from_fen_auto()` examines the FEN and chooses the right mode
+2. **No changes to move decoding**: SCID's castling encoding already works for Chess960
+3. **Shakmaty handles the complexity**: The chess library manages Chess960 rules internally
+4. **Backward compatible**: Standard chess FENs continue to work exactly as before
 
 ---
 
@@ -930,46 +1416,47 @@ pub struct DecodedMove {
     pub from: Square,
     pub to: Square,
     pub promotion: Option<Role>,
+    pub is_null_move: bool,  // True for King null move (value 0)
 }
 
 /// King move decoder
 ///
-/// Move values:
-/// - 0: Null move (error)
-/// - 1-8: Adjacent squares (NW, N, NE, W, E, SW, S, SE)
-/// - 10: Kingside castle
-/// - 11: Queenside castle
+/// Move values (from SCID_DATABASE_FORMAT.md Section 4.2.1, game.cpp lines 59108-59136):
+/// - 0: NULL MOVE (valid! king stays in place - used for analysis)
+/// - 1-8: Adjacent squares (specific direction encoding)
+/// - 9: Queenside castle (O-O-O)
+/// - 10: Kingside castle (O-O)
+/// - 11-15: INVALID
+///
+/// Direction encoding for values 1-8:
+/// From game.cpp decodeKing(): dirIndex = val - 1, uses direction table
 pub fn decode_king_move(from: Square, move_value: u8, color: Color) -> Result<DecodedMove> {
-    if move_value == 0 {
-        return Err(ScidError::ParseError {
-            file: PathBuf::from("decoder"),
-            offset: 0,
-            message: "Null move not allowed".to_string(),
-        });
-    }
-
-    let to = if move_value >= 1 && move_value <= 8 {
+    let to = if move_value == 0 {
+        // NULL MOVE - King stays in place (used for analysis positions)
+        // This is a VALID move in SCID, not an error!
+        from
+    } else if move_value >= 1 && move_value <= 8 {
         // Adjacent square moves
-        // Square offsets: [unused, NW, N, NE, W, E, SW, S, SE]
-        let offsets = [0, -9, -8, -7, -1, 1, 7, 8, 9];
+        // Direction table from game.cpp: UP_LEFT, UP, UP_RIGHT, LEFT, RIGHT, DOWN_LEFT, DOWN, DOWN_RIGHT
+        let offsets: [i8; 9] = [0, 7, 8, 9, -1, 1, -9, -8, -7];
         offset_square(from, offsets[move_value as usize])?
-    } else if move_value == 10 {
-        // Kingside castle
-        match color {
-            Color::White => Square::G1,
-            Color::Black => Square::G8,
-        }
-    } else if move_value == 11 {
-        // Queenside castle
+    } else if move_value == 9 {
+        // Queenside castle (O-O-O) - King moves to c-file
         match color {
             Color::White => Square::C1,
             Color::Black => Square::C8,
+        }
+    } else if move_value == 10 {
+        // Kingside castle (O-O) - King moves to g-file
+        match color {
+            Color::White => Square::G1,
+            Color::Black => Square::G8,
         }
     } else {
         return Err(ScidError::ParseError {
             file: PathBuf::from("decoder"),
             offset: 0,
-            message: format!("Invalid king move value: {}", move_value),
+            message: format!("Invalid king move value: {} (valid: 0-10)", move_value),
         });
     };
 
@@ -977,96 +1464,134 @@ pub fn decode_king_move(from: Square, move_value: u8, color: Color) -> Result<De
         from,
         to,
         promotion: None,
+        is_null_move: move_value == 0,  // Flag null moves for special handling
     })
 }
 
 /// Knight move decoder
 ///
-/// Move values 1-8 represent L-shaped jumps
+/// Move values (from SCID_DATABASE_FORMAT.md Section 4.2.3, game.cpp lines 59204-59230):
+/// - 0: INVALID (error)
+/// - 1-8: L-shaped jumps (valid knight moves)
+/// - 9-15: INVALID (error)
+///
+/// Knight L-shaped offset table from game.cpp:
+/// knightDir[] = { -17, -15, -10, -6, 6, 10, 15, 17 }
+/// Indexed by (val - 1), so val=1 gives offset -17, etc.
 pub fn decode_knight_move(from: Square, move_value: u8) -> Result<DecodedMove> {
+    // CRITICAL: Values 0 and 9-15 are INVALID for knights!
     if move_value == 0 || move_value > 8 {
         return Err(ScidError::ParseError {
             file: PathBuf::from("decoder"),
             offset: 0,
-            message: format!("Invalid knight move value: {}", move_value),
+            message: format!("Invalid knight move value: {} (valid: 1-8 only)", move_value),
         });
     }
 
-    // Knight L-shaped offsets
-    let offsets = [0, -17, -15, -10, -6, 6, 10, 15, 17];
+    // Knight L-shaped offsets (indexed by val - 1)
+    // From game.cpp: knightDir[] = { -17, -15, -10, -6, 6, 10, 15, 17 }
+    let offsets: [i8; 9] = [0, -17, -15, -10, -6, 6, 10, 15, 17];
     let to = offset_square(from, offsets[move_value as usize])?;
 
     Ok(DecodedMove {
         from,
         to,
         promotion: None,
+        is_null_move: false,
     })
 }
 
 /// Pawn move decoder
 ///
-/// Move values:
-/// - 0: Capture left
-/// - 1: Move forward one square
-/// - 2: Capture right
-/// - 3-5: Queen promotion (left capture, forward, right capture)
-/// - 6-8: Rook promotion
-/// - 9-11: Bishop promotion
-/// - 12-14: Knight promotion
-/// - 15: Double push
+/// Move values (from SCID_DATABASE_FORMAT.md Section 4.2.6, game.cpp lines 59298-59345):
+///
+/// Uses toSquareDiff lookup table: {7, 8, 9, 7, 8, 9, 7, 8, 9, 7, 8, 9, 7, 8, 9, 16}
+///
+/// val % 3 determines direction:
+/// - 0 = capture left (7 squares)
+/// - 1 = forward (8 squares)
+/// - 2 = capture right (9 squares)
+///
+/// val / 3 determines promotion piece (0-4):
+/// - 0 (vals 0-2): No promotion (regular move/capture)
+/// - 1 (vals 3-5): Queen promotion
+/// - 2 (vals 6-8): Rook promotion
+/// - 3 (vals 9-11): Bishop promotion
+/// - 4 (vals 12-14): Knight promotion
+/// - val 15: Double pawn push (offset 16)
+///
+/// CRITICAL: White ADDS the offset, Black SUBTRACTS the offset!
 pub fn decode_pawn_move(from: Square, move_value: u8, color: Color) -> Result<DecodedMove> {
-    let forward = match color {
-        Color::White => 8,   // White pawns move up (+8)
-        Color::Black => -8,  // Black pawns move down (-8)
-    };
-
-    let (offset, promotion) = match move_value {
-        0 => (forward - 1, None),                      // Capture left
-        1 => (forward, None),                          // Forward one
-        2 => (forward + 1, None),                      // Capture right
-        3 => (forward - 1, Some(Role::Queen)),         // Promote to Queen (capture left)
-        4 => (forward, Some(Role::Queen)),             // Promote to Queen (forward)
-        5 => (forward + 1, Some(Role::Queen)),         // Promote to Queen (capture right)
-        6 => (forward - 1, Some(Role::Rook)),          // Promote to Rook (capture left)
-        7 => (forward, Some(Role::Rook)),              // Promote to Rook (forward)
-        8 => (forward + 1, Some(Role::Rook)),          // Promote to Rook (capture right)
-        9 => (forward - 1, Some(Role::Bishop)),        // Promote to Bishop (capture left)
-        10 => (forward, Some(Role::Bishop)),           // Promote to Bishop (forward)
-        11 => (forward + 1, Some(Role::Bishop)),       // Promote to Bishop (capture right)
-        12 => (forward - 1, Some(Role::Knight)),       // Promote to Knight (capture left)
-        13 => (forward, Some(Role::Knight)),           // Promote to Knight (forward)
-        14 => (forward + 1, Some(Role::Knight)),       // Promote to Knight (capture right)
-        15 => (forward * 2, None),                     // Double push
-        _ => return Err(ScidError::ParseError {
+    if move_value > 15 {
+        return Err(ScidError::ParseError {
             file: PathBuf::from("decoder"),
             offset: 0,
-            message: format!("Invalid pawn move value: {}", move_value),
-        }),
+            message: format!("Invalid pawn move value: {} (valid: 0-15)", move_value),
+        });
+    }
+
+    // toSquareDiff lookup table from game.cpp
+    const TO_SQUARE_DIFF: [i8; 16] = [7, 8, 9, 7, 8, 9, 7, 8, 9, 7, 8, 9, 7, 8, 9, 16];
+
+    // Get base offset from table
+    let base_offset = TO_SQUARE_DIFF[move_value as usize];
+
+    // Direction depends on color: White adds, Black subtracts
+    let offset = match color {
+        Color::White => base_offset,
+        Color::Black => -base_offset,
     };
 
+    // Calculate target square
     let to = offset_square(from, offset)?;
+
+    // Determine promotion piece (if any)
+    let promotion = match move_value / 3 {
+        0 => None,                    // vals 0-2: No promotion
+        1 => Some(Role::Queen),       // vals 3-5: Queen promotion
+        2 => Some(Role::Rook),        // vals 6-8: Rook promotion
+        3 => Some(Role::Bishop),      // vals 9-11: Bishop promotion
+        4 => Some(Role::Knight),      // vals 12-14: Knight promotion
+        5 => None,                    // val 15: Double push, no promotion
+        _ => unreachable!(),
+    };
 
     Ok(DecodedMove {
         from,
         to,
         promotion,
+        is_null_move: false,
     })
 }
 
 /// Rook move decoder (vertical and horizontal only)
+///
+/// From SCID_DATABASE_FORMAT.md Section 4.2.5, game.cpp lines 59183-59195:
+///
+/// Move values 0-15:
+/// - Values 0-7: Horizontal move (target file = val, same rank)
+/// - Values 8-15: Vertical move (target rank = val - 8, same file)
 pub fn decode_rook_move(from: Square, move_value: u8) -> Result<DecodedMove> {
+    if move_value > 15 {
+        return Err(ScidError::ParseError {
+            file: PathBuf::from("decoder"),
+            offset: 0,
+            message: format!("Invalid rook move value: {} (valid: 0-15)", move_value),
+        });
+    }
+
     let from_file = from.file() as u8;
     let from_rank = from.rank() as u8;
 
     let to = if move_value >= 8 {
-        // Vertical move
+        // Vertical move: target rank = val - 8, same file
         let target_rank = move_value - 8;
         Square::from_coords(
             shakmaty::File::new(from_file as u32),
             shakmaty::Rank::new(target_rank as u32)
         )
     } else {
-        // Horizontal move
+        // Horizontal move: target file = val, same rank
         Square::from_coords(
             shakmaty::File::new(move_value as u32),
             shakmaty::Rank::new(from_rank as u32)
@@ -1077,37 +1602,81 @@ pub fn decode_rook_move(from: Square, move_value: u8) -> Result<DecodedMove> {
         from,
         to,
         promotion: None,
+        is_null_move: false,
     })
 }
 
 /// Bishop move decoder (diagonal only)
+///
+/// From SCID_DATABASE_FORMAT.md Section 4.2.4, game.cpp lines 59232-59262:
+///
+/// ```cpp
+/// // From SCID decodeBishop():
+/// byte fyle = (val & 7);                              // Target file (0-7)
+/// int fylediff = (int)fyle - (int)square_Fyle(sm->from);
+/// if (val >= 8) {
+///     sm->to = sm->from - 7 * fylediff;  // up-left/down-right diagonal
+/// } else {
+///     sm->to = sm->from + 9 * fylediff;  // up-right/down-left diagonal
+/// }
+/// ```
+///
+/// **Bishop Move Value Structure**:
+/// | Bits | Meaning |
+/// |------|---------|
+/// | 0-2 (val & 7) | Target file (0=a, 7=h) |
+/// | 3 (val & 8) | Diagonal direction: 0=up-right/down-left, 1=up-left/down-right |
+///
+/// **Diagonal Direction Logic**:
+/// - `val < 8`: Up-right or down-left diagonal (offset = +9 * fylediff)
+/// - `val >= 8`: Up-left or down-right diagonal (offset = -7 * fylediff)
 pub fn decode_bishop_move(from: Square, move_value: u8) -> Result<DecodedMove> {
-    // Bishop uses direct square encoding (0-63)
-    if move_value > 63 {
+    if move_value > 15 {
         return Err(ScidError::ParseError {
             file: PathBuf::from("decoder"),
             offset: 0,
-            message: format!("Invalid bishop move value: {}", move_value),
+            message: format!("Invalid bishop move value: {} (valid: 0-15)", move_value),
         });
     }
 
-    let to = Square::new(move_value);
+    // Extract target file from low 3 bits
+    let target_file = (move_value & 7) as i8;
+    let from_file = from.file() as i8;
+    let fylediff = target_file - from_file;
+
+    // Calculate square offset based on diagonal direction
+    let offset = if move_value >= 8 {
+        // Up-left / down-right diagonal
+        -7 * fylediff
+    } else {
+        // Up-right / down-left diagonal
+        9 * fylediff
+    };
+
+    // Calculate target square
+    let to = offset_square(from, offset)?;
 
     Ok(DecodedMove {
         from,
         to,
         promotion: None,
+        is_null_move: false,
     })
 }
 
 /// Queen move decoder with ByteStream support for diagonal moves
 ///
+/// From SCID_DATABASE_FORMAT.md Section 4.2.7, game.cpp lines 59264-59282:
+///
 /// CRITICAL: Queen diagonal moves require 2 bytes!
 ///
-/// From SCID source (game.cpp decodeQueen):
-/// - If move_value >= 8: Vertical move (1 byte)
-/// - If move_value != from_file: Horizontal move (1 byte)
-/// - Otherwise: Diagonal move (2 bytes) - READ NEXT BYTE FROM STREAM!
+/// Decision tree:
+/// - If move_value >= 8: Vertical move (1 byte) - target rank = val - 8
+/// - If move_value != from_file: Horizontal move (1 byte) - target file = val
+/// - Otherwise (val == from_file): Diagonal move (2 bytes) - READ NEXT BYTE FROM STREAM!
+///
+/// For diagonal moves, second byte encodes target square: target = second_byte - 64
+/// Valid range for second byte: [64, 127]
 pub fn decode_queen_move(
     from: Square,
     move_value: u8,
@@ -1118,6 +1687,7 @@ pub fn decode_queen_move(
 
     let to = if move_value >= 8 {
         // CASE 1: Vertical move (rook-like, 1 byte)
+        // Target rank = val - 8, same file
         let target_rank = move_value - 8;
         Square::from_coords(
             shakmaty::File::new(from_file as u32),
@@ -1125,12 +1695,14 @@ pub fn decode_queen_move(
         )
     } else if move_value != from_file {
         // CASE 2: Horizontal move (rook-like, 1 byte)
+        // Target file = val, same rank
         Square::from_coords(
             shakmaty::File::new(move_value as u32),
             shakmaty::Rank::new(from_rank as u32)
         )
     } else {
         // CASE 3: Diagonal move (bishop-like, 2 bytes)
+        // move_value == from_file signals diagonal move
         // Read second byte from stream!
         let second_byte = stream.get_byte()?;
 
@@ -1139,7 +1711,10 @@ pub fn decode_queen_move(
             return Err(ScidError::ParseError {
                 file: PathBuf::from("decoder"),
                 offset: 0,
-                message: format!("Invalid queen diagonal target byte: {}", second_byte),
+                message: format!(
+                    "Invalid queen diagonal target byte: {} (valid: 64-127)",
+                    second_byte
+                ),
             });
         }
 
@@ -1151,6 +1726,7 @@ pub fn decode_queen_move(
         from,
         to,
         promotion: None,
+        is_null_move: false,
     })
 }
 
@@ -1201,17 +1777,31 @@ mod tests {
 
     #[test]
     fn test_king_castling() {
-        // White kingside castle
+        // White kingside castle (O-O) - value 10
         let decoded = decode_king_move(Square::E1, 10, Color::White).unwrap();
         assert_eq!(decoded.to, Square::G1);
+        assert!(!decoded.is_null_move);
 
-        // White queenside castle
-        let decoded = decode_king_move(Square::E1, 11, Color::White).unwrap();
+        // White queenside castle (O-O-O) - value 9 (NOT 11!)
+        let decoded = decode_king_move(Square::E1, 9, Color::White).unwrap();
         assert_eq!(decoded.to, Square::C1);
+        assert!(!decoded.is_null_move);
 
-        // Black kingside castle
+        // Black kingside castle (O-O) - value 10
         let decoded = decode_king_move(Square::E8, 10, Color::Black).unwrap();
         assert_eq!(decoded.to, Square::G8);
+
+        // Black queenside castle (O-O-O) - value 9
+        let decoded = decode_king_move(Square::E8, 9, Color::Black).unwrap();
+        assert_eq!(decoded.to, Square::C8);
+    }
+
+    #[test]
+    fn test_king_null_move() {
+        // Null move (value 0) - King stays in place
+        let decoded = decode_king_move(Square::E1, 0, Color::White).unwrap();
+        assert_eq!(decoded.to, Square::E1);  // Same as from
+        assert!(decoded.is_null_move);
     }
 
     #[test]
@@ -1301,9 +1891,10 @@ cargo test --lib decoder
 
 **Expected Output**:
 ```
-running 9 tests
+running 10 tests
 test parser::decoder::tests::test_king_adjacent_moves ... ok
 test parser::decoder::tests::test_king_castling ... ok
+test parser::decoder::tests::test_king_null_move ... ok
 test parser::decoder::tests::test_pawn_moves ... ok
 test parser::decoder::tests::test_pawn_promotions ... ok
 test parser::decoder::tests::test_queen_vertical ... ok
@@ -1311,7 +1902,7 @@ test parser::decoder::tests::test_queen_horizontal ... ok
 test parser::decoder::tests::test_queen_diagonal ... ok
 test parser::decoder::tests::test_knight_moves ... ok
 
-test result: ok. 9 passed
+test result: ok. 10 passed
 ```
 
 ---
@@ -1536,7 +2127,7 @@ mod tests {
         let fen = "r1bqkb1r/pppp1ppp/2n2n2/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 4 4";
         let mut decoder = ScidMoveDecoder::from_fen(fen).unwrap();
 
-        // Kingside castle (king piece 0, move value 10)
+        // Kingside castle O-O (king piece 0, move value 10)
         let castle_byte = (0 << 4) | 10;
 
         let mut stream = ByteStream::new(&[]);
@@ -1545,6 +2136,23 @@ mod tests {
         // Verify castling move
         assert_eq!(chess_move.from(), Some(Square::E1));
         assert_eq!(chess_move.to(), Square::G1);
+    }
+
+    #[test]
+    fn test_decode_queenside_castling() {
+        // Set up position where queenside castling is legal
+        let fen = "r3kbnr/pppqpppp/2n5/3p1b2/3P1B2/2N5/PPPQPPPP/R3KBNR w KQkq - 6 5";
+        let mut decoder = ScidMoveDecoder::from_fen(fen).unwrap();
+
+        // Queenside castle O-O-O (king piece 0, move value 9, NOT 11!)
+        let castle_byte = (0 << 4) | 9;
+
+        let mut stream = ByteStream::new(&[]);
+        let chess_move = decoder.decode_move(castle_byte, &mut stream).unwrap();
+
+        // Verify castling move
+        assert_eq!(chess_move.from(), Some(Square::E1));
+        assert_eq!(chess_move.to(), Square::C1);
     }
 
     #[test]
@@ -1572,15 +2180,514 @@ cargo test --lib move_decoder
 
 **Expected Output**:
 ```
-running 5 tests
+running 6 tests
 test parser::move_decoder::tests::test_decode_e4 ... ok
 test parser::move_decoder::tests::test_decode_knight_f3 ... ok
 test parser::move_decoder::tests::test_decode_queen_diagonal ... ok
 test parser::move_decoder::tests::test_decode_castling ... ok
+test parser::move_decoder::tests::test_decode_queenside_castling ... ok
 test parser::move_decoder::tests::test_decode_pawn_promotion ... ok
 
-test result: ok. 5 passed
+test result: ok. 6 passed
 ```
+
+---
+
+#### Task 5.2.4: Game Tree and Variation Data Structures
+
+**Objective**: Define data structures for representing complete games with variations, comments, and NAGs.
+
+**Reference**: IMPLEMENTATION_PLAN.md Phase 4.3
+
+**Why Needed**: Games in SCID aren't just linear move lists - they include:
+- Variations (alternative lines)
+- Comments attached to moves
+- NAG annotations
+- Nested variations within variations
+
+**Implementation**:
+
+**File**: `crates/core/src/parser/game_tree.rs`
+
+```rust
+use shakmaty::Move;
+
+/// Complete game representation with variations
+#[derive(Debug, Clone)]
+pub struct GameTree {
+    /// Starting position (None for standard start, Some(fen) for custom)
+    pub start_fen: Option<String>,
+
+    /// Root of the move tree (main line + variations)
+    pub root: MoveNode,
+}
+
+/// Single node in move tree
+#[derive(Debug, Clone)]
+pub struct MoveNode {
+    /// The chess move (None for root node before first move)
+    pub chess_move: Option<Move>,
+
+    /// Comment attached to this move (from ENCODE_COMMENT markers)
+    pub comment: Option<String>,
+
+    /// NAG annotations (from ENCODE_NAG markers)
+    pub nags: Vec<u8>,
+
+    /// Continuation (next move in this line)
+    pub continuation: Option<Box<MoveNode>>,
+
+    /// Alternative variations starting from this position
+    /// Created when ENCODE_START_MARKER (0x0D) is encountered
+    pub variations: Vec<MoveNode>,
+}
+
+impl MoveNode {
+    /// Create root node (before first move)
+    pub fn root() -> Self {
+        MoveNode {
+            chess_move: None,
+            comment: None,
+            nags: Vec::new(),
+            continuation: None,
+            variations: Vec::new(),
+        }
+    }
+
+    /// Create node with a move
+    pub fn with_move(chess_move: Move) -> Self {
+        MoveNode {
+            chess_move: Some(chess_move),
+            comment: None,
+            nags: Vec::new(),
+            continuation: None,
+            variations: Vec::new(),
+        }
+    }
+
+    /// Add a move as continuation and return mutable reference to it
+    pub fn add_continuation(&mut self, chess_move: Move) -> &mut MoveNode {
+        self.continuation = Some(Box::new(MoveNode::with_move(chess_move)));
+        self.continuation.as_mut().unwrap()
+    }
+
+    /// Add a variation and return mutable reference to first move
+    pub fn add_variation(&mut self, first_move: Move) -> &mut MoveNode {
+        self.variations.push(MoveNode::with_move(first_move));
+        self.variations.last_mut().unwrap()
+    }
+
+    /// Iterate over main line moves
+    pub fn main_line(&self) -> MainLineIter {
+        MainLineIter { current: Some(self) }
+    }
+}
+
+/// Iterator over main line moves
+pub struct MainLineIter<'a> {
+    current: Option<&'a MoveNode>,
+}
+
+impl<'a> Iterator for MainLineIter<'a> {
+    type Item = &'a MoveNode;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let node = self.current?;
+        self.current = node.continuation.as_deref();
+        Some(node)
+    }
+}
+
+impl GameTree {
+    /// Create new game tree with standard starting position
+    pub fn new() -> Self {
+        GameTree {
+            start_fen: None,
+            root: MoveNode::root(),
+        }
+    }
+
+    /// Create game tree with custom starting position
+    pub fn with_fen(fen: String) -> Self {
+        GameTree {
+            start_fen: Some(fen),
+            root: MoveNode::root(),
+        }
+    }
+
+    /// Get main line moves as vector
+    pub fn main_line_moves(&self) -> Vec<&Move> {
+        self.root.main_line()
+            .filter_map(|node| node.chess_move.as_ref())
+            .collect()
+    }
+
+    /// Count total moves including variations (DFS)
+    pub fn total_move_count(&self) -> usize {
+        fn count_node(node: &MoveNode) -> usize {
+            let mut count = if node.chess_move.is_some() { 1 } else { 0 };
+            if let Some(ref cont) = node.continuation {
+                count += count_node(cont);
+            }
+            for var in &node.variations {
+                count += count_node(var);
+            }
+            count
+        }
+        count_node(&self.root)
+    }
+}
+
+/// Variation parsing state machine with position tracking (Gap 1)
+///
+/// # CRITICAL: Position State Restoration
+///
+/// When entering a variation (START_MARKER 0x0D), we must save the COMPLETE
+/// chess position state. When exiting (END_MARKER 0x0E), we restore it.
+///
+/// This is essential because variations are alternative continuations from
+/// a specific position. Without restoring, the position would be corrupted
+/// by the variation's moves.
+///
+/// ## Why Position State Matters
+///
+/// ```text
+/// Main line: 1.e4 e5 2.Nf3
+///                      ↓
+///              ┌───────┴────────┐
+///              │                │
+///           2...Nc6          [VAR: 2...d6 3.d4]
+///              ↓                  ↓
+///           3.Bb5             END_MARKER (0x0E)
+///                                 ↓
+///                             ← MUST restore position after 2.Nf3!
+/// ```
+///
+/// ## Position State Stack
+///
+/// Each stack entry includes the complete position state:
+/// - Board configuration (piece placement)
+/// - Side to move
+/// - Castling rights
+/// - En passant square
+/// - Halfmove clock
+/// - Fullmove number
+/// - SCID piece number mapping (for continued decoding)
+#[derive(Debug)]
+pub struct VariationParseState {
+    /// Stack of saved positions for variation restore
+    position_stack: Vec<VariationSnapshot>,
+
+    /// Current chess position
+    current_position: shakmaty::Chess,
+
+    /// Current SCID piece mapping (for move decoding)
+    current_piece_mapping: PieceNumberMapping,
+
+    /// Current node in tree being built
+    current_node: *mut MoveNode,
+
+    /// Variation depth (for debugging)
+    depth: usize,
+}
+
+/// Snapshot of state to restore after variation ends
+#[derive(Debug, Clone)]
+pub struct VariationSnapshot {
+    /// Chess position at variation start
+    pub position: shakmaty::Chess,
+
+    /// SCID piece mapping at variation start
+    pub piece_mapping: PieceNumberMapping,
+
+    /// Node to return to (parent of variation)
+    pub return_node: *mut MoveNode,
+}
+
+impl VariationParseState {
+    /// Create new parse state with starting position
+    pub fn new(start_position: shakmaty::Chess) -> Self {
+        let piece_mapping = PieceNumberMapping::from_position(&start_position);
+        Self {
+            position_stack: Vec::new(),
+            current_position: start_position,
+            current_piece_mapping: piece_mapping,
+            current_node: std::ptr::null_mut(),
+            depth: 0,
+        }
+    }
+
+    /// Create from FEN string
+    pub fn from_fen(fen: &str) -> Result<Self, ScidError> {
+        use shakmaty::fen::Fen;
+        let parsed: Fen = fen.parse().map_err(|e| {
+            ScidError::InvalidFormat(format!("FEN parse error: {:?}", e))
+        })?;
+        let position: shakmaty::Chess = parsed
+            .into_position(shakmaty::CastlingMode::Standard)
+            .map_err(|e| {
+                ScidError::InvalidFormat(format!("Invalid position: {:?}", e))
+            })?;
+        Ok(Self::new(position))
+    }
+
+    /// Handle START_MARKER (0x0D) - entering a variation
+    ///
+    /// Saves complete position state before processing variation moves.
+    pub fn start_variation(&mut self) {
+        // Save complete state snapshot
+        let snapshot = VariationSnapshot {
+            position: self.current_position.clone(),
+            piece_mapping: self.current_piece_mapping.clone(),
+            return_node: self.current_node,
+        };
+        self.position_stack.push(snapshot);
+
+        self.depth += 1;
+    }
+
+    /// Handle END_MARKER (0x0E) - exiting a variation
+    ///
+    /// Restores complete position state to continue main line.
+    pub fn end_variation(&mut self) -> bool {
+        if let Some(snapshot) = self.position_stack.pop() {
+            // Restore complete state
+            self.current_position = snapshot.position;
+            self.current_piece_mapping = snapshot.piece_mapping;
+            self.current_node = snapshot.return_node;
+            self.depth = self.depth.saturating_sub(1);
+            true
+        } else {
+            // No variation to end - may be malformed data
+            false
+        }
+    }
+
+    /// Apply a move to current position
+    pub fn apply_move(&mut self, chess_move: &shakmaty::Move) -> Result<(), ScidError> {
+        // Update piece mapping for capture handling
+        self.current_piece_mapping.update_after_move(chess_move, &self.current_position);
+
+        // Apply move to position
+        self.current_position = self.current_position.clone()
+            .play(chess_move)
+            .map_err(|e| ScidError::InvalidFormat(format!("Illegal move: {:?}", e)))?;
+
+        Ok(())
+    }
+
+    /// Get current position for move validation
+    pub fn position(&self) -> &shakmaty::Chess {
+        &self.current_position
+    }
+
+    /// Get current piece mapping for move decoding
+    pub fn piece_mapping(&self) -> &PieceNumberMapping {
+        &self.current_piece_mapping
+    }
+
+    /// Current variation depth
+    pub fn variation_depth(&self) -> usize {
+        self.depth
+    }
+}
+```
+
+**NAG Constants** (common values for PGN output):
+
+```rust
+/// Common NAG (Numeric Annotation Glyph) values
+pub mod nag {
+    pub const GOOD_MOVE: u8 = 1;           // !
+    pub const MISTAKE: u8 = 2;             // ?
+    pub const BRILLIANT_MOVE: u8 = 3;      // !!
+    pub const BLUNDER: u8 = 4;             // ??
+    pub const INTERESTING_MOVE: u8 = 5;    // !?
+    pub const DUBIOUS_MOVE: u8 = 6;        // ?!
+    pub const EQUAL: u8 = 10;              // =
+    pub const UNCLEAR: u8 = 13;            // ∞
+    pub const SLIGHT_ADVANTAGE_WHITE: u8 = 14;  // +=
+    pub const SLIGHT_ADVANTAGE_BLACK: u8 = 15;  // =+
+    pub const CLEAR_ADVANTAGE_WHITE: u8 = 16;   // ±
+    pub const CLEAR_ADVANTAGE_BLACK: u8 = 17;   // ∓
+    pub const WINNING_WHITE: u8 = 18;      // +-
+    pub const WINNING_BLACK: u8 = 19;      // -+
+
+    /// Convert NAG to PGN symbol (for common NAGs) or $N notation
+    pub fn to_pgn_string(nag: u8) -> String {
+        match nag {
+            1 => "!".to_string(),
+            2 => "?".to_string(),
+            3 => "!!".to_string(),
+            4 => "??".to_string(),
+            5 => "!?".to_string(),
+            6 => "?!".to_string(),
+            _ => format!("${}", nag),
+        }
+    }
+}
+```
+
+**Testing**:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shakmaty::{Square, Role, Move};
+
+    #[test]
+    fn test_game_tree_creation() {
+        let mut tree = GameTree::new();
+
+        // Add e4
+        let e4 = Move::Normal {
+            role: Role::Pawn,
+            from: Square::E2,
+            to: Square::E4,
+            capture: None,
+            promotion: None,
+        };
+        let node = tree.root.add_continuation(e4);
+
+        // Add e5
+        let e5 = Move::Normal {
+            role: Role::Pawn,
+            from: Square::E7,
+            to: Square::E5,
+            capture: None,
+            promotion: None,
+        };
+        node.add_continuation(e5);
+
+        assert_eq!(tree.main_line_moves().len(), 2);
+        assert_eq!(tree.total_move_count(), 2);
+    }
+
+    #[test]
+    fn test_variation_creation() {
+        let mut tree = GameTree::new();
+
+        // Main line: 1. e4
+        let e4 = Move::Normal {
+            role: Role::Pawn,
+            from: Square::E2,
+            to: Square::E4,
+            capture: None,
+            promotion: None,
+        };
+        let node = tree.root.add_continuation(e4);
+
+        // Variation: 1. d4
+        let d4 = Move::Normal {
+            role: Role::Pawn,
+            from: Square::D2,
+            to: Square::D4,
+            capture: None,
+            promotion: None,
+        };
+        tree.root.add_variation(d4);
+
+        assert_eq!(tree.main_line_moves().len(), 1);  // Only e4 in main line
+        assert_eq!(tree.total_move_count(), 2);       // e4 + d4
+        assert_eq!(tree.root.variations.len(), 1);
+    }
+
+    #[test]
+    fn test_variation_parse_state_position_restore() {
+        // Test Gap 1: Position state is correctly saved and restored
+
+        // Create starting position
+        let start = shakmaty::Chess::default();
+        let mut state = VariationParseState::new(start.clone());
+
+        // Play 1.e4
+        let e4 = Move::Normal {
+            role: Role::Pawn,
+            from: Square::E2,
+            to: Square::E4,
+            capture: None,
+            promotion: None,
+        };
+        state.apply_move(&e4).unwrap();
+
+        // Save position hash before variation
+        let position_before_var = state.position().clone();
+
+        // Enter variation
+        state.start_variation();
+        assert_eq!(state.variation_depth(), 1);
+
+        // Play 1...d5 in variation
+        let d5 = Move::Normal {
+            role: Role::Pawn,
+            from: Square::D7,
+            to: Square::D5,
+            capture: None,
+            promotion: None,
+        };
+        state.apply_move(&d5).unwrap();
+
+        // Position should now be different (after 1...d5)
+        assert_ne!(state.position().board(), position_before_var.board());
+
+        // End variation
+        assert!(state.end_variation());
+        assert_eq!(state.variation_depth(), 0);
+
+        // Position should be restored to after 1.e4
+        assert_eq!(state.position().board(), position_before_var.board());
+    }
+
+    #[test]
+    fn test_variation_parse_state_nested_variations() {
+        // Test nested variations (Gap 1)
+
+        let start = shakmaty::Chess::default();
+        let mut state = VariationParseState::new(start);
+
+        // Play 1.e4
+        let e4 = Move::Normal {
+            role: Role::Pawn,
+            from: Square::E2,
+            to: Square::E4,
+            capture: None,
+            promotion: None,
+        };
+        state.apply_move(&e4).unwrap();
+
+        // Enter first variation
+        state.start_variation();
+        assert_eq!(state.variation_depth(), 1);
+
+        // Enter nested variation
+        state.start_variation();
+        assert_eq!(state.variation_depth(), 2);
+
+        // End nested variation
+        assert!(state.end_variation());
+        assert_eq!(state.variation_depth(), 1);
+
+        // End first variation
+        assert!(state.end_variation());
+        assert_eq!(state.variation_depth(), 0);
+
+        // No more variations to end
+        assert!(!state.end_variation());
+    }
+}
+```
+
+**Acceptance Criteria**:
+- [ ] GameTree struct represents complete games with variations
+- [ ] MoveNode supports comments, NAGs, and nested variations
+- [ ] Main line iteration works correctly
+- [ ] Variation counting works correctly
+- [ ] NAG formatting matches PGN specification
+- [ ] VariationParseState tracks position state stack (Gap 1)
+- [ ] VariationSnapshot captures complete position + piece mapping (Gap 1)
+- [ ] start_variation() saves complete state before variation
+- [ ] end_variation() restores complete state after variation
 
 ---
 
@@ -1599,7 +2706,8 @@ test result: ok. 5 passed
 **Acceptance Criteria**:
 - [ ] Parse game data from .sg4 file
 - [ ] Decode all moves in sequence
-- [ ] Handle variations (future: Phase 7)
+- [ ] Handle variations with position state restore (Gap 1)
+- [ ] Handle pre-game comments (Gap 3)
 - [ ] Handle comments and NAGs (future: Phase 6)
 - [ ] Return vector of shakmaty Moves
 
@@ -1619,6 +2727,20 @@ pub struct GameData {
     pub flags: u8,
     pub start_position: Option<String>,
     pub moves: Vec<ChessMove>,  // Changed from Vec<u8> to Vec<ChessMove>
+
+    /// Pre-game comment (Gap 3)
+    ///
+    /// Comment that appears BEFORE the first move.
+    /// In PGN output, this appears after the tags but before move 1.
+    ///
+    /// Example PGN:
+    /// ```pgn
+    /// [Event "Tournament"]
+    /// [White "Player1"]
+    ///
+    /// {This game decided the championship.} 1.e4 e5
+    /// ```
+    pub pre_game_comment: Option<String>,
 }
 
 /// Parse complete game including moves
@@ -1674,6 +2796,12 @@ pub fn parse_game(
     let mut stream = ByteStream::new(move_bytes);
     let mut moves = Vec::new();
 
+    // Track pre-game comment (Gap 3)
+    // A comment marker BEFORE the first move indicates a pre-game comment
+    let mut pre_game_comment: Option<String> = None;
+    let mut first_move_seen = false;
+    let mut comment_markers_before_first_move = 0;
+
     while stream.has_more() {
         let byte = stream.peek_byte()?;
 
@@ -1691,23 +2819,35 @@ pub fn parse_game(
             stream.get_byte()?;
             continue;
         } else if byte == 12 {
-            // ENCODE_COMMENT - skip until null terminator
+            // ENCODE_COMMENT marker (Gap 3)
+            // NOTE: This is just a MARKER - actual text is in comment section!
             stream.get_byte()?;
-            while stream.has_more() && stream.get_byte()? != 0 {}
+
+            // Track pre-game comments (before first move)
+            if !first_move_seen {
+                comment_markers_before_first_move += 1;
+            }
             continue;
         }
 
-        // Regular move
+        // Regular move - marks first move seen
+        first_move_seen = true;
         let move_byte = stream.get_byte()?;
         let chess_move = decoder.decode_move(move_byte, &mut stream)?;
         moves.push(chess_move);
     }
+
+    // If there were comment markers before first move, the first comment
+    // in the comment section is a pre-game comment (Gap 3)
+    // Note: Actual comment text extraction happens when processing comment_data
+    // from Phase 4's parse_game_structure()
 
     Ok(GameData {
         tags,
         flags,
         start_position: start_fen.map(String::from),
         moves,
+        pre_game_comment,  // Will be filled when processing comment_data
     })
 }
 ```
@@ -1718,7 +2858,7 @@ pub fn parse_game(
 #[test]
 fn test_parse_complete_game() {
     // Use test database from Phase 4
-    let mut sg4_file = File::open("test/data/five.sg4").unwrap();
+    let mut sg4_file = File::open("tests/data/five.sg4").unwrap();
 
     // Game 1 metadata from index (from Phase 2)
     let offset = 0;
@@ -1748,6 +2888,166 @@ Decoded 37 moves
 First move: Move::Normal { role: Pawn, from: e2, to: e4, capture: None, promotion: None }
 test database::games::tests::test_parse_complete_game ... ok
 ```
+
+---
+
+#### Task 5.3.1.1: Pre-Game Comment Handling (Gap 3)
+
+**Objective**: Properly handle comments that appear BEFORE the first chess move.
+
+**Reference**: IMPLEMENTATION_PLAN.md Gap 3, Phase 4.3
+
+**Why This Matters**: SCID allows annotators to add introductory comments before the game starts. These comments are common in annotated games and tournament collections.
+
+**The Problem**:
+
+Comments in SCID are stored in TWO parts:
+1. **Markers (0x0C)** in move data indicate where comments exist
+2. **Text** is stored separately in the comment section
+
+A comment marker appearing BEFORE any move byte indicates a pre-game comment:
+
+```text
+Move data with pre-game comment:
+[0x0C][move1_bytes][0x0C][move2_bytes][0x0F]
+  ↑                  ↑
+  pre-game          after-move-1
+  comment           comment
+
+Comment section:
+["Game intro text\0"]["Good opening!\0"]
+```
+
+**Implementation**:
+
+```rust
+/// Track pre-game comment state during parsing
+pub struct GameParseState {
+    /// Whether we've seen the first actual move
+    first_move_seen: bool,
+
+    /// Number of comment markers before first move
+    pre_game_comment_count: usize,
+
+    /// The pre-game comment text (extracted from comment section)
+    pre_game_comment: Option<String>,
+
+    // ... other state
+}
+
+impl GameParseState {
+    /// Handle comment marker (0x0C)
+    pub fn handle_comment_marker(&mut self) {
+        if !self.first_move_seen {
+            // This is a pre-game comment marker
+            self.pre_game_comment_count += 1;
+        }
+        // Note: We don't read text here - just track the marker
+    }
+
+    /// Mark that first move has been seen
+    pub fn mark_first_move(&mut self) {
+        self.first_move_seen = true;
+    }
+
+    /// Attach comments from comment section to game tree
+    pub fn attach_comments(&mut self, comment_data: &[u8], tree: &mut GameTree) {
+        let mut comment_iter = CommentIterator::new(comment_data);
+
+        // First comment(s) go to pre-game if markers were seen before first move
+        for _ in 0..self.pre_game_comment_count {
+            if let Some(text) = comment_iter.next() {
+                // Multiple pre-game comments get concatenated
+                match &mut self.pre_game_comment {
+                    Some(existing) => {
+                        existing.push_str("\n\n");
+                        existing.push_str(&text);
+                    }
+                    None => {
+                        self.pre_game_comment = Some(text);
+                    }
+                }
+            }
+        }
+
+        // Remaining comments attach to moves in tree traversal order
+        // ... (handled by attach_comments_to_tree from Phase 4)
+    }
+}
+```
+
+**PGN Output for Pre-Game Comments**:
+
+Pre-game comments appear after the tag section but before move 1:
+
+```pgn
+[Event "World Championship"]
+[Site "Moscow"]
+[Date "1985.09.03"]
+[White "Karpov, Anatoly"]
+[Black "Kasparov, Garry"]
+[Result "0-1"]
+
+{This was the decisive game of the 1985 World Championship match.
+Kasparov finally broke through Karpov's solid defense with brilliant
+piece play.} 1.d4 Nf6 2.c4 e6 3.Nc3 Bb4 {The Nimzo-Indian Defense}
+```
+
+**Testing**:
+
+```rust
+#[test]
+fn test_pre_game_comment_detection() {
+    // Simulated move data with pre-game comment marker
+    let move_data = vec![
+        0x0C,  // Comment marker BEFORE first move
+        0xCF,  // First move (e4)
+        0x0C,  // Comment marker AFTER first move
+        0x0F,  // End of game
+    ];
+
+    let mut state = GameParseState::new();
+    let mut stream = ByteStream::new(&move_data);
+
+    while stream.has_more() {
+        let byte = stream.get_byte().unwrap();
+        match byte {
+            0x0C => state.handle_comment_marker(),
+            0x0F => break,
+            _ => {
+                state.mark_first_move();
+                // decode move...
+            }
+        }
+    }
+
+    assert_eq!(state.pre_game_comment_count, 1);
+    assert!(state.first_move_seen);
+}
+
+#[test]
+fn test_pre_game_comment_text_extraction() {
+    // Comment section data
+    let comment_data = b"Game introduction.\0After first move.\0";
+
+    let mut comment_iter = CommentIterator::new(comment_data);
+
+    // First comment is the pre-game comment
+    let pre_game = comment_iter.next().unwrap();
+    assert_eq!(pre_game, "Game introduction.");
+
+    // Second comment attaches to first move
+    let move_comment = comment_iter.next().unwrap();
+    assert_eq!(move_comment, "After first move.");
+}
+```
+
+**Acceptance Criteria**:
+- [ ] Pre-game comment markers detected (0x0C before first move)
+- [ ] Pre-game comment text extracted from comment section
+- [ ] Multiple pre-game comments concatenated if present
+- [ ] Pre-game comment stored in GameData
+- [ ] Tests pass for pre-game comment handling
 
 ---
 
@@ -1781,7 +3081,7 @@ use scidtopgn_core::database::parse_game;
 #[test]
 fn test_five_database_complete() {
     // Open test database
-    let reader = ScidReader::open("test/data/five").unwrap();
+    let reader = ScidReader::open("tests/data/five").unwrap();
 
     println!("Database: {}", reader.metadata().description);
     println!("Total games: {}", reader.metadata().num_games);
@@ -1819,7 +3119,7 @@ fn test_five_database_complete() {
 #[test]
 fn test_special_moves() {
     // This test verifies specific games with known special moves
-    let reader = ScidReader::open("test/data/five").unwrap();
+    let reader = ScidReader::open("tests/data/five").unwrap();
 
     // Test castling (verify in actual game data)
     // Test en passant (if present in test data)
@@ -1850,7 +3150,7 @@ fn test_special_moves() {
 #[test]
 fn test_queen_diagonal_moves() {
     // Specific test for 2-byte Queen diagonal moves
-    let reader = ScidReader::open("test/data/five").unwrap();
+    let reader = ScidReader::open("tests/data/five").unwrap();
 
     let mut queen_diagonal_count = 0;
 
@@ -2042,6 +3342,76 @@ piece_mapping.insert(piece_num, to_square);
 
 ---
 
+### Pitfall 6: Not Using SCID's Capture Swap Algorithm
+
+**Problem**: Simply removing captured pieces creates gaps in piece numbering.
+
+**Why This Matters**: SCID maintains a compact piece list. When piece N is captured, the LAST piece in the list (highest slot number) moves to slot N. This is critical for correct piece number references in subsequent moves.
+
+**Example**:
+```rust
+// ❌ WRONG - leaves gap in piece numbering
+opponent_mapping.remove(&captured_slot);
+// Now slots might be: 0, 1, 2, 4, 5 (gap at 3!)
+// Future move bytes expect contiguous numbering
+```
+
+**Solution**: Implement SCID's swap algorithm:
+```rust
+// ✅ CORRECT - SCID capture swap algorithm
+if let Some(captured_num) = captured_slot {
+    let last_slot = opponent_pieces.keys().max().copied();
+    if let Some(last) = last_slot {
+        if last != captured_num {
+            // Move last piece to captured slot
+            let last_square = opponent_pieces[&last];
+            opponent_pieces.insert(captured_num, last_square);
+        }
+        // Remove the last slot
+        opponent_pieces.remove(&last);
+    }
+}
+// Now slots are: 0, 1, 2, 3, 4 (compact, no gaps!)
+```
+
+**Reference**: SCID_DATABASE_FORMAT.md Section 4.4, position.cpp DoSimpleMove()
+
+---
+
+### Pitfall 7: Wrong Piece Numbering Order
+
+**Problem**: Assuming pieces are numbered by type (King, Queen, Rooks, etc.) instead of by starting file.
+
+**Symptoms**:
+- First few moves work, then "invalid piece number" errors
+- Knights and Bishops swapped
+- Queen moves fail
+
+**Example**:
+```rust
+// ❌ WRONG - numbered by piece type
+mapping.insert(0, Square::E1);  // King
+mapping.insert(1, Square::D1);  // Queen ← WRONG! Should be slot 4
+mapping.insert(2, Square::A1);  // Rook a1 ← WRONG! Should be slot 1
+```
+
+**Solution**: Number by starting file position:
+```rust
+// ✅ CORRECT - numbered by starting file (from SCID initPieceList)
+mapping.insert(0, Square::E1);  // King (always 0)
+mapping.insert(1, Square::A1);  // QR - Queen's Rook (a-file)
+mapping.insert(2, Square::B1);  // QN - Queen's Knight (b-file)
+mapping.insert(3, Square::C1);  // QB - Queen's Bishop (c-file)
+mapping.insert(4, Square::D1);  // Q  - Queen (d-file)
+mapping.insert(5, Square::F1);  // KB - King's Bishop (f-file)
+mapping.insert(6, Square::G1);  // KN - King's Knight (g-file)
+mapping.insert(7, Square::H1);  // KR - King's Rook (h-file)
+```
+
+**Reference**: SCID_DATABASE_FORMAT.md Section 4.1.2, game.cpp initPieceList()
+
+---
+
 ## Success Metrics
 
 ### Phase 5 Completion Criteria
@@ -2055,7 +3425,7 @@ piece_mapping.insert(piece_num, to_square);
 - [x] Integration with game parser complete
 
 **Testing**:
-- [x] All unit tests passing (30+ tests)
+- [x] All unit tests passing (40+ tests)
 - [x] Integration tests with real database passing
 - [x] Queen diagonal moves (2-byte) working
 - [x] All special moves validated (castling, en passant, promotions)
@@ -2084,8 +3454,8 @@ cargo tarpaulin --lib --tests --exclude-files 'tests/*'
 **Expected Final Output**:
 ```
 === PHASE 5 VALIDATION SUMMARY ===
-Total test cases: 42
-Passing: 42
+Total test cases: 50
+Passing: 50
 Failing: 0
 
 Real-world database parsing:
@@ -2123,4 +3493,158 @@ println!("{}", san);  // Outputs: "Nf3", "O-O", "exd5", etc.
 
 ---
 
-**Phase 5 represents the heart of the SCID parser**: transforming opaque binary data into meaningful chess moves. With shakmaty handling the chess rules and our decoders bridging the SCID format, we now have a robust foundation for complete SCID to PGN conversion.**
+**Phase 5 represents the heart of the SCID parser**: transforming opaque binary data into meaningful chess moves. With shakmaty handling the chess rules and our decoders bridging the SCID format, we now have a robust foundation for complete SCID to PGN conversion.
+
+---
+
+## Revision History
+
+### Version 2.3 (Current) - Gap Resolution Updates
+
+This version incorporates Gap 1 (Variation Position Restore) and Gap 3 (Pre-game Comments).
+
+**Gap Resolutions**:
+
+| Gap | Section | Changes |
+|-----|---------|---------|
+| Gap 1: Variation Position Restore | Task 5.2.4 | Added `VariationParseState` with position/piece mapping stack |
+| Gap 1: Variation Position Restore | Task 5.2.4 | Added `VariationSnapshot` for complete state capture |
+| Gap 1: Variation Position Restore | Task 5.2.4 | `start_variation()` saves position AND piece mapping |
+| Gap 1: Variation Position Restore | Task 5.2.4 | `end_variation()` restores complete state |
+| Gap 3: Pre-game Comments | Task 5.3.1 | Added `pre_game_comment` field to `GameData` |
+| Gap 3: Pre-game Comments | Task 5.3.1 | Track comment markers before first move |
+| Gap 3: Pre-game Comments | Task 5.3.1.1 | NEW: Complete pre-game comment handling task |
+
+**New Structures**:
+- `VariationParseState` - State machine for parsing with position tracking
+- `VariationSnapshot` - Captured state at variation entry point
+- `GameParseState` - Extended state tracking for comment handling
+
+**Key Insight for Gap 1**: When entering a variation, we must save BOTH:
+1. The chess position (board, castling rights, en passant, etc.)
+2. The SCID piece number mapping (for continued move decoding)
+
+Without saving the piece mapping, move bytes would be decoded incorrectly after returning from a variation.
+
+---
+
+### Version 2.2 (January 2026) - Chess960 Support
+
+This version adds Chess960 (Fischer Random Chess) support per IMPLEMENTATION_GAPS.md Gap 10.
+
+**New Features**:
+
+1. **Task 5.1.3: Chess960 (FRC) Support ADDED**
+   - `is_chess960_fen()` function to detect Chess960 positions from FEN
+   - `from_fen_auto()` method with automatic castling mode detection
+   - Uses shakmaty's `CastlingMode::Chess960` for FRC positions
+   - Comprehensive test coverage for Chess960 edge cases
+
+**Key Insight**: SCID's castling encoding already works for Chess960 because it encodes
+the **destination squares** (C1/G1), not the rook's starting position. No changes needed
+to the castling decoder!
+
+**Changes Summary**:
+
+| Section | Change |
+|---------|--------|
+| Task 5.1.3 | NEW: Complete Chess960/FRC support |
+| Task 5.1.2 | Updated `from_fen()` to use `from_fen_auto()` |
+
+**Reference**: IMPLEMENTATION_PLAN.md Phase 5.1.1, IMPLEMENTATION_GAPS.md Gap 10
+
+---
+
+### Version 2.1 (January 2026) - Gap Filling and Alignment with IMPLEMENTATION_PLAN.md
+
+This version aligns Phase 5 with updates made to IMPLEMENTATION_PLAN.md and fixes remaining issues.
+
+**Critical Fixes**:
+
+1. **Bishop Decoder FIXED** (was WRONG in v2.0!)
+   - OLD (WRONG): Used formula `((val/4)+1) * (val&1 ? -1 : 1)` with separate rank/file directions
+   - NEW (CORRECT): Uses `fyle = val & 7; offset = (val >= 8) ? -7*fylediff : 9*fylediff`
+   - This matches the verified Bible (SCID_DATABASE_FORMAT.md Section 4.2.4)
+
+2. **PieceNumberMapping Struct UPDATED**
+   - Added `white_count` and `black_count` fields for capture swap algorithm
+   - Struct now properly tracks piece counts per color
+
+3. **from_position() FIXED**
+   - Now scans board in correct FEN order (rank 8 DOWN to rank 1)
+   - Properly initializes piece counts
+
+4. **update_after_move() REWRITTEN**
+   - Now uses piece counts directly instead of `keys().max()`
+   - Handles en passant capture square correctly
+   - Handles all move types: Normal, Castle, EnPassant
+
+**New Features**:
+
+5. **Task 5.2.4: Game Tree and Variation Data Structures ADDED**
+   - New `GameTree` struct for complete game representation
+   - New `MoveNode` struct with variations, comments, NAGs support
+   - Main line iteration support
+   - NAG constants module with PGN formatting
+
+**Changes Summary**:
+
+| Section | Change |
+|---------|--------|
+| Task 5.1.1 | Added `white_count`/`black_count` to `PieceNumberMapping` |
+| Task 5.1.1 | Fixed `from_position()` to scan in FEN order |
+| Task 5.1.1 | Rewrote `update_after_move()` with proper capture swap |
+| Task 5.2.2 | **CRITICAL**: Fixed Bishop decoder algorithm |
+| Task 5.2.4 | NEW: Added GameTree, MoveNode, NAG handling |
+
+---
+
+### Version 2.0 (January 2026) - Major Corrections from Bible Verification
+
+This version incorporates critical corrections after verifying SCID_DATABASE_FORMAT.md against the actual SCID source code.
+
+**Breaking Changes**:
+
+1. **Piece Numbering Order FIXED**
+   - OLD (WRONG): King=0, Queen=1, Rook a1=2, Rook h1=3, Bishop c1=4...
+   - NEW (CORRECT): King=0, QR=1 (a1), QN=2 (b1), QB=3 (c1), Q=4 (d1), KB=5 (f1), KN=6 (g1), KR=7 (h1)
+   - Pieces are numbered by STARTING FILE, not piece type!
+
+2. **King Castling Values FIXED**
+   - OLD (WRONG): value 10 = kingside, value 11 = queenside
+   - NEW (CORRECT): value 9 = queenside (O-O-O), value 10 = kingside (O-O)
+   - Value 0 is now recognized as valid NULL MOVE
+
+3. **Pawn Encoding FIXED**
+   - OLD (WRONG): Simple forward offset arithmetic
+   - NEW (CORRECT): Uses toSquareDiff table {7,8,9,7,8,9,7,8,9,7,8,9,7,8,9,16}
+   - White ADDS offset, Black SUBTRACTS offset
+
+4. **Bishop Encoding FIXED** (note: fixed again in v2.1)
+   - OLD (WRONG): "Direct square encoding (0-63)"
+   - PARTIALLY CORRECT: Mentioned fylediff but had wrong implementation
+
+5. **Knight Validation ADDED**
+   - Values 0 and 9-15 are now correctly marked as INVALID
+
+6. **Capture Swap Algorithm ADDED**
+   - New Section 4.4: When a piece is captured, the LAST piece takes its slot
+   - Critical for maintaining correct piece numbering throughout game
+
+7. **FEN Initialization FIXED**
+   - King ALWAYS gets slot 0 first, regardless of board position
+   - Other pieces assigned by board scan order (rank-by-rank, file-by-file)
+
+**New Pitfalls Added**:
+- Pitfall 6: Not Using SCID's Capture Swap Algorithm
+- Pitfall 7: Wrong Piece Numbering Order
+
+**Reference Documentation Updated**:
+- All line number references updated to match verified Bible
+- Added source code line references for each decoder function
+
+---
+
+### Version 1.0 (Original)
+- Initial document creation with best-guess implementations
+- Based on preliminary SCID format analysis

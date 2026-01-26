@@ -74,9 +74,26 @@ Integers use 1, 2, or 3 bytes depending on maximum value:
 
 ## Test Data Reference
 
-We will validate against `test/data/five.sn4`:
+### Location and Datasets
 
-**Expected Header Values**:
+All test data is in `tests/data/`. See `IMPLEMENTATION_PLAN.md` → "Test Data" section for complete documentation.
+
+| Dataset | Name File | Description |
+|---------|-----------|-------------|
+| **one** | `one.sn4` | Single game - basic name parsing |
+| **five** | `five.sn4` | Five games - front-coding validation |
+
+### PGN ↔ SCID Relationship
+
+Each SCID database was created by importing its corresponding PGN file:
+- `one.pgn` → `one.sn4` (player/event/site names match PGN tags)
+- `five.pgn` → `five.sn4` (player/event/site names match PGN tags)
+
+This enables validation: parsed names should match the original PGN tag values.
+
+### Expected Values (five.sn4)
+
+**Header**:
 - Magic: `"Scid.sn\0"` (bytes 0-7)
 - Timestamp: (varies)
 - Number of players: (varies, but > 0)
@@ -84,7 +101,7 @@ We will validate against `test/data/five.sn4`:
 - Number of sites: (varies)
 - Number of rounds: (varies)
 
-**Expected Name Values** (from Phase 2 Game 1):
+**Expected Names** (from Phase 2 Game 1):
 - White Player (ID from index): "Hossain, Enam"
 - Black Player (ID from index): "Cheparinov, I"
 
@@ -282,11 +299,29 @@ pub struct NameDatabase {
     pub rounds: Vec<String>,
 }
 
+/// Result of looking up a name by ID
+///
+/// Provides detailed information about why a lookup might fail,
+/// enabling better error messages and debugging.
+///
+/// See IMPLEMENTATION_PLAN.md Phase 3.2.1 for specification.
+#[derive(Debug, Clone, PartialEq)]
+pub enum NameLookupResult<'a> {
+    /// Name found successfully
+    Found(&'a str),
+    /// Name entry exists but is empty (unknown/unspecified)
+    Empty,
+    /// ID is out of bounds for the name array
+    OutOfBounds(u32),
+}
+
 impl NameDatabase {
     /// Create empty name database
     pub fn new() -> Self {
         Self::default()
     }
+
+    // === Basic Lookup Methods (return Option) ===
 
     /// Get player name by ID (index)
     ///
@@ -308,6 +343,117 @@ impl NameDatabase {
     /// Get round name by ID (index)
     pub fn get_round(&self, id: u32) -> Option<&str> {
         self.rounds.get(id as usize).map(|s| s.as_str())
+    }
+
+    // === Safe Lookup Methods (return PGN-safe strings) ===
+    //
+    // These methods handle edge cases for PGN output:
+    // - Out of bounds ID → returns "?"
+    // - Empty string → returns "?"
+    // - Valid name → returns the name
+    //
+    // See IMPLEMENTATION_PLAN.md Phase 3.2.1 for specification.
+
+    /// Get player name safely for PGN output
+    ///
+    /// Returns "?" for unknown players (out of bounds or empty).
+    /// This ensures PGN output is always valid.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Player ID from index entry
+    ///
+    /// # Returns
+    ///
+    /// Player name or "?" if unknown
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # fn example() {
+    /// // let name = names.get_player_safe(player_id);
+    /// // Always valid for PGN: [White "Magnus Carlsen"] or [White "?"]
+    /// # }
+    /// ```
+    pub fn get_player_safe(&self, id: u32) -> &str {
+        self.players
+            .get(id as usize)
+            .map(|s| if s.is_empty() { "?" } else { s.as_str() })
+            .unwrap_or("?")
+    }
+
+    /// Get event name safely for PGN output
+    ///
+    /// Returns "?" for unknown events (out of bounds or empty).
+    pub fn get_event_safe(&self, id: u32) -> &str {
+        self.events
+            .get(id as usize)
+            .map(|s| if s.is_empty() { "?" } else { s.as_str() })
+            .unwrap_or("?")
+    }
+
+    /// Get site name safely for PGN output
+    ///
+    /// Returns "?" for unknown sites (out of bounds or empty).
+    pub fn get_site_safe(&self, id: u32) -> &str {
+        self.sites
+            .get(id as usize)
+            .map(|s| if s.is_empty() { "?" } else { s.as_str() })
+            .unwrap_or("?")
+    }
+
+    /// Get round name safely for PGN output
+    ///
+    /// Returns "?" for unknown rounds (out of bounds or empty).
+    pub fn get_round_safe(&self, id: u32) -> &str {
+        self.rounds
+            .get(id as usize)
+            .map(|s| if s.is_empty() { "?" } else { s.as_str() })
+            .unwrap_or("?")
+    }
+
+    // === Detailed Lookup Methods (return NameLookupResult) ===
+    //
+    // These methods provide detailed information about lookup failures,
+    // useful for error reporting and debugging.
+
+    /// Look up player with detailed result
+    ///
+    /// Returns detailed information about the lookup result,
+    /// useful for debugging and error reporting.
+    pub fn lookup_player(&self, id: u32) -> NameLookupResult<'_> {
+        match self.players.get(id as usize) {
+            Some(s) if s.is_empty() => NameLookupResult::Empty,
+            Some(s) => NameLookupResult::Found(s),
+            None => NameLookupResult::OutOfBounds(id),
+        }
+    }
+
+    /// Look up event with detailed result
+    pub fn lookup_event(&self, id: u32) -> NameLookupResult<'_> {
+        match self.events.get(id as usize) {
+            Some(s) if s.is_empty() => NameLookupResult::Empty,
+            Some(s) => NameLookupResult::Found(s),
+            None => NameLookupResult::OutOfBounds(id),
+        }
+    }
+
+    /// Look up site with detailed result
+    pub fn lookup_site(&self, id: u32) -> NameLookupResult<'_> {
+        match self.sites.get(id as usize) {
+            Some(s) if s.is_empty() => NameLookupResult::Empty,
+            Some(s) => NameLookupResult::Found(s),
+            None => NameLookupResult::OutOfBounds(id),
+        }
+    }
+
+    /// Look up round with detailed result
+    pub fn lookup_round(&self, id: u32) -> NameLookupResult<'_> {
+        match self.rounds.get(id as usize) {
+            Some(s) if s.is_empty() => NameLookupResult::Empty,
+            Some(s) => NameLookupResult::Found(s),
+            None => NameLookupResult::OutOfBounds(id),
+        }
     }
 }
 ```
@@ -1132,7 +1278,7 @@ use std::path::PathBuf;
 /// Get path to test data file
 fn test_data_path(filename: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../test/data")
+        .join("../../tests/data")
         .join(filename)
 }
 
@@ -1400,7 +1546,7 @@ use std::path::PathBuf;
 
 fn test_data_path(filename: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../test/data")
+        .join("../../tests/data")
         .join(filename)
 }
 
@@ -1535,6 +1681,331 @@ Ready for Phase 4: Game File Structure."
 - [ ] No clippy warnings
 - [ ] Code formatted
 - [ ] Git committed
+
+---
+
+### Task 3.2.9: Name ID Lookup and Edge Cases
+
+**Acceptance Criteria**:
+- Safe lookup methods return "?" for unknown/empty names
+- Detailed lookup methods provide diagnostic information
+- Edge cases documented and handled
+- Complete test coverage
+
+**Context (from Gap 11 Analysis)**:
+
+Name IDs in SCID are 0-indexed array indices. Edge cases to handle:
+
+1. **Empty String**: A name can exist at index N but be an empty string (meaning "unknown" or unspecified)
+2. **Out of Bounds**: An ID may reference beyond the name array (corrupted data)
+3. **Valid Name**: Normal case - return the name string
+
+The PGN standard uses "?" for unknown values, so safe methods should return "?" for edge cases.
+
+**Implementation**:
+
+The safe lookup methods are defined in the `NameDatabase` struct (see Task 3.1.1):
+
+```rust
+/// Result of looking up a name by ID
+#[derive(Debug, Clone, PartialEq)]
+pub enum NameLookupResult<'a> {
+    /// Name found successfully
+    Found(&'a str),
+    /// Name entry exists but is empty
+    Empty,
+    /// ID is out of bounds
+    OutOfBounds(u32),
+}
+
+impl NameDatabase {
+    // Safe methods for PGN output (always return valid string)
+    pub fn get_player_safe(&self, id: u32) -> &str {
+        self.players
+            .get(id as usize)
+            .map(|s| if s.is_empty() { "?" } else { s.as_str() })
+            .unwrap_or("?")
+    }
+
+    // Similar for get_event_safe(), get_site_safe(), get_round_safe()
+
+    // Detailed lookup methods for diagnostics
+    pub fn lookup_player(&self, id: u32) -> NameLookupResult<'_> {
+        match self.players.get(id as usize) {
+            Some(s) if s.is_empty() => NameLookupResult::Empty,
+            Some(s) => NameLookupResult::Found(s),
+            None => NameLookupResult::OutOfBounds(id),
+        }
+    }
+
+    // Similar for lookup_event(), lookup_site(), lookup_round()
+}
+```
+
+**Usage in PGN Output**:
+
+```rust
+// Always produces valid PGN tags
+fn format_pgn_headers(entry: &GameIndexEntry, names: &NameDatabase) -> String {
+    format!(
+        "[White \"{}\"]\n[Black \"{}\"]\n[Event \"{}\"]\n[Site \"{}\"]\n",
+        names.get_player_safe(entry.white_id),
+        names.get_player_safe(entry.black_id),
+        names.get_event_safe(entry.event_id),
+        names.get_site_safe(entry.site_id),
+    )
+}
+```
+
+**Tests**:
+
+```rust
+#[cfg(test)]
+mod edge_case_tests {
+    use super::*;
+
+    #[test]
+    fn test_safe_lookup_returns_question_mark_for_empty() {
+        let mut db = NameDatabase::new();
+        db.players.push("".to_string()); // Empty = unknown
+
+        assert_eq!(db.get_player_safe(0), "?");
+    }
+
+    #[test]
+    fn test_safe_lookup_returns_question_mark_for_out_of_bounds() {
+        let db = NameDatabase::new();
+
+        assert_eq!(db.get_player_safe(999), "?");
+    }
+
+    #[test]
+    fn test_safe_lookup_returns_name_for_valid() {
+        let mut db = NameDatabase::new();
+        db.players.push("Carlsen, Magnus".to_string());
+
+        assert_eq!(db.get_player_safe(0), "Carlsen, Magnus");
+    }
+
+    #[test]
+    fn test_detailed_lookup_distinguishes_empty_vs_out_of_bounds() {
+        let mut db = NameDatabase::new();
+        db.players.push("".to_string());
+
+        assert_eq!(db.lookup_player(0), NameLookupResult::Empty);
+        assert_eq!(db.lookup_player(999), NameLookupResult::OutOfBounds(999));
+    }
+}
+```
+
+**Validation**:
+
+```bash
+cargo test -p scidtopgn-core edge_case_tests
+# All tests should pass
+```
+
+---
+
+### Task 3.2.10: Round String Formats and PGN Escaping
+
+**Acceptance Criteria**:
+- Round string formats documented
+- PGN string escaping function implemented
+- Hyphen normalization for round strings
+- Complete test coverage
+
+**Context (from Gap 12 Analysis)**:
+
+Rounds are stored as plain strings in the name file. Common formats include:
+- Simple numbers: "1", "2", "10"
+- Dotted notation: "1.1", "3.2" (round.board)
+- Descriptive: "Final", "Semifinal", "Playoff"
+- Hyphenated: "1-5" (might need normalization)
+
+PGN tag values may contain characters that need escaping:
+- Backslash `\` → `\\`
+- Double quote `"` → `\"`
+
+**Implementation**:
+
+Add to `crates/core/src/database/names.rs`:
+
+```rust
+/// Escape a string for use in a PGN tag value
+///
+/// PGN tag values are enclosed in double quotes, so any quotes
+/// or backslashes in the value must be escaped.
+///
+/// # Escaping Rules (PGN Standard)
+///
+/// - `\` → `\\` (backslash)
+/// - `"` → `\"` (double quote)
+///
+/// # Arguments
+///
+/// * `s` - Raw string from name database
+///
+/// # Returns
+///
+/// Escaped string safe for PGN output
+///
+/// # Examples
+///
+/// ```
+/// # fn example() {
+/// // assert_eq!(escape_pgn_string("Normal Event"), "Normal Event");
+/// // assert_eq!(escape_pgn_string("Event \"Special\""), "Event \\\"Special\\\"");
+/// // assert_eq!(escape_pgn_string("Path\\Name"), "Path\\\\Name");
+/// # }
+/// ```
+pub fn escape_pgn_string(s: &str) -> String {
+    s.chars()
+        .flat_map(|c| match c {
+            '\\' => vec!['\\', '\\'],
+            '"' => vec!['\\', '"'],
+            _ => vec![c],
+        })
+        .collect()
+}
+
+/// Normalize a round string for consistent output
+///
+/// Some SCID databases store rounds with hyphens that should be
+/// preserved. This function provides optional normalization.
+///
+/// # Current Behavior
+///
+/// Returns the round string unchanged. Hyphens are valid in PGN
+/// round values (e.g., "1-5" for games 1-5 of a match).
+///
+/// # Arguments
+///
+/// * `round` - Round string from name database
+///
+/// # Returns
+///
+/// Normalized round string
+pub fn normalize_round(round: &str) -> &str {
+    // Currently no normalization needed
+    // Hyphens are valid in PGN round values
+    round
+}
+
+impl NameDatabase {
+    /// Get round name normalized for PGN output
+    ///
+    /// Applies normalization rules to round strings.
+    /// Returns "?" for unknown rounds.
+    pub fn get_round_normalized(&self, id: u32) -> &str {
+        match self.get_round(id) {
+            Some(s) if s.is_empty() => "?",
+            Some(s) => normalize_round(s),
+            None => "?",
+        }
+    }
+}
+```
+
+**Round String Format Documentation**:
+
+```text
+Round String Formats in SCID:
+
+Format          Example     Notes
+─────────────────────────────────────────────────────
+Simple number   "1"         Most common
+Multi-digit     "10"        No leading zeros
+Dotted          "1.1"       Round.Board notation
+Descriptive     "Final"     Text descriptions
+Hyphenated      "1-5"       Range or match games
+Empty           ""          Unknown round (→ "?")
+
+All formats are valid PGN. No normalization required.
+```
+
+**Tests**:
+
+```rust
+#[cfg(test)]
+mod pgn_escaping_tests {
+    use super::*;
+
+    #[test]
+    fn test_escape_normal_string() {
+        assert_eq!(escape_pgn_string("Normal Event"), "Normal Event");
+        assert_eq!(escape_pgn_string("Carlsen, Magnus"), "Carlsen, Magnus");
+    }
+
+    #[test]
+    fn test_escape_quotes() {
+        assert_eq!(
+            escape_pgn_string("The \"Super\" Tournament"),
+            "The \\\"Super\\\" Tournament"
+        );
+    }
+
+    #[test]
+    fn test_escape_backslash() {
+        assert_eq!(
+            escape_pgn_string("Path\\Name"),
+            "Path\\\\Name"
+        );
+    }
+
+    #[test]
+    fn test_escape_both() {
+        assert_eq!(
+            escape_pgn_string("Test\\\"Value"),
+            "Test\\\\\\\"Value"
+        );
+    }
+
+    #[test]
+    fn test_escape_empty() {
+        assert_eq!(escape_pgn_string(""), "");
+    }
+
+    #[test]
+    fn test_round_formats() {
+        // All these are valid round formats
+        assert_eq!(normalize_round("1"), "1");
+        assert_eq!(normalize_round("10"), "10");
+        assert_eq!(normalize_round("1.1"), "1.1");
+        assert_eq!(normalize_round("Final"), "Final");
+        assert_eq!(normalize_round("1-5"), "1-5");
+    }
+}
+```
+
+**Usage in PGN Formatter**:
+
+```rust
+// Safe PGN header formatting with escaping
+fn format_pgn_header(tag: &str, value: &str) -> String {
+    format!("[{} \"{}\"]\n", tag, escape_pgn_string(value))
+}
+
+// Example usage
+fn format_game_headers(entry: &GameIndexEntry, names: &NameDatabase) -> String {
+    let mut headers = String::new();
+
+    headers.push_str(&format_pgn_header("Event", names.get_event_safe(entry.event_id)));
+    headers.push_str(&format_pgn_header("Site", names.get_site_safe(entry.site_id)));
+    headers.push_str(&format_pgn_header("Round", names.get_round_normalized(entry.round_id)));
+    headers.push_str(&format_pgn_header("White", names.get_player_safe(entry.white_id)));
+    headers.push_str(&format_pgn_header("Black", names.get_player_safe(entry.black_id)));
+
+    headers
+}
+```
+
+**Validation**:
+
+```bash
+cargo test -p scidtopgn-core pgn_escaping_tests
+# All tests should pass
+```
 
 ---
 
@@ -1724,3 +2195,22 @@ Subsequent names:
 ---
 
 **Phase 3 Complete**: Name File Parser ✅
+
+---
+
+## Revision History
+
+| Version | Date       | Changes                                                |
+|---------|------------|--------------------------------------------------------|
+| 1.0     | Initial    | Original Phase 3 implementation plan                   |
+| 1.1     | 2025-01-20 | Added Task 3.2.9: Name ID Lookup and Edge Cases        |
+|         |            | - Safe lookup methods (get_player_safe, etc.)          |
+|         |            | - NameLookupResult enum for detailed diagnostics       |
+|         |            | - Edge case handling for empty/out-of-bounds names     |
+|         |            | Added Task 3.2.10: Round String Formats and PGN Escaping |
+|         |            | - escape_pgn_string() function                         |
+|         |            | - normalize_round() function                           |
+|         |            | - get_round_normalized() method                        |
+|         |            | - Round format documentation                           |
+|         |            | Updated NameDatabase struct with new methods           |
+|         |            | (Addresses IMPLEMENTATION_GAPS.md Gaps 11 and 12)      |

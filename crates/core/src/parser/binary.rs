@@ -1,1 +1,1 @@
-//! Binary parsing helpers (endianness, bit manipulation)
+// Placeholder - will be implemented in Phase 2

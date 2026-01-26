@@ -52,7 +52,7 @@ fn test_parse_game_entry() {
 ```rust
 #[test]
 fn test_parse_complete_database() {
-    let reader = ScidReader::open("tests/fixtures/real_database.si4").unwrap();
+    let reader = ScidReader::open("tests/data/five").unwrap();
 
     // Parse all games
     let mut count = 0;
@@ -72,24 +72,58 @@ fn test_parse_complete_database() {
 
 ---
 
+## Test Data Reference
+
+### Location and Datasets
+
+All test data is in `tests/data/`. See `IMPLEMENTATION_PLAN.md` → "Test Data" section for complete documentation.
+
+| Dataset | PGN Source | SCID Database | Purpose |
+|---------|------------|---------------|---------|
+| **one** | `one.pgn` | `one.si4/sg4/sn4` | Minimal integration test |
+| **five** | `five.pgn` | `five.si4/sg4/sn4` | Full integration validation |
+
+### PGN ↔ SCID Relationship
+
+**Critical for Integration Testing**: Each SCID database was created by importing its corresponding PGN file. This enables round-trip validation:
+
+```
+┌─────────────┐     Import      ┌─────────────────────────┐
+│  five.pgn   │  ─────────────► │  five.si4/sg4/sn4       │
+│  (source)   │                 │  (SCID database)        │
+└─────────────┘                 └─────────────────────────┘
+       ▲                                    │
+       │                                    │ Parse + Convert
+       │      Compare (must match)          ▼
+       └──────────────────────────  Generated PGN output
+```
+
+### Integration Test Requirements
+
+1. **Parse all games** from both datasets without errors
+2. **Generate PGN output** for each game
+3. **Compare against source PGN** - content must match
+4. **Verify no data loss** - all tags, moves, annotations preserved
+
+---
+
 ## Reference: Integration Testing Best Practices
 
 ### Test Fixture Organization
 
-Place test data in a structured directory:
+Test data is organized in `tests/data/`:
 
 ```
 tests/
-├── fixtures/
-│   ├── minimal.si4/sn4/sg4     # 1 game, simplest case
-│   ├── medium.si4/sn4/sg4      # 100 games, typical case
-│   ├── large.si4/sn4/sg4       # 10,000+ games, stress test
-│   ├── special_moves.si4/...   # Games with castling, en passant, etc.
-│   ├── corrupted.si4/...       # Intentionally malformed data
-│   └── expected/
-│       ├── minimal.pgn         # Expected output for minimal.si4
-│       ├── medium_game_0.pgn   # Expected output for specific games
-│       └── special_moves.pgn
+├── data/
+│   ├── one.pgn                 # Source PGN (1 game)
+│   ├── one.si4                 # SCID index file
+│   ├── one.sg4                 # SCID game file
+│   ├── one.sn4                 # SCID name file
+│   ├── five.pgn                # Source PGN (5 games)
+│   ├── five.si4                # SCID index file
+│   ├── five.sg4                # SCID game file
+│   └── five.sn4                # SCID name file
 ├── integration_test.rs
 ├── benchmark_test.rs
 └── fuzzing_test.rs
@@ -103,11 +137,11 @@ tests/
 use scidtopgn_core::ScidReader;
 use std::path::PathBuf;
 
-// Helper to get test fixture path
-fn fixture_path(name: &str) -> PathBuf {
+// Helper to get test data path
+fn test_data_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
-        .join("fixtures")
+        .join("data")
         .join(name)
 }
 

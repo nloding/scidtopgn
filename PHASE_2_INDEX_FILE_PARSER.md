@@ -66,14 +66,31 @@ let version = u16::from_le_bytes([bytes[8], bytes[9]]);
 
 ## Test Data Reference
 
-We will validate against `test/data/five.si4` (5-game test database):
+### Location and Datasets
 
-**Expected Header Values**:
+All test data is in `tests/data/`. See `IMPLEMENTATION_PLAN.md` → "Test Data" section for complete documentation.
+
+| Dataset | Index File | Description |
+|---------|------------|-------------|
+| **one** | `one.si4` | Single game - basic parsing validation |
+| **five** | `five.si4` | Five games - comprehensive testing |
+
+### PGN ↔ SCID Relationship
+
+Each SCID database was created by importing its corresponding PGN file:
+- `one.pgn` → `one.si4` (identical content, different format)
+- `five.pgn` → `five.si4` (identical content, different format)
+
+This enables **round-trip validation**: parse SCID → compare against source PGN.
+
+### Expected Values (five.si4)
+
+**Header**:
 - Magic: `"Scid.si\0"` (bytes 0-7)
 - Version: `400` (bytes 8-9, big-endian)
 - Game Count: `5` (bytes 14-16, 24-bit big-endian)
 
-**Expected Game 1 Values** (from SCID_DATABASE_FORMAT.md lines 1556-1567):
+**Game 1** (from SCID_DATABASE_FORMAT.md lines 1556-1567):
 - White Player: "Hossain, Enam" (ID parsed from entry)
 - Black Player: "Cheparinov, I" (ID 1)
 - Date: 2022.12.19
@@ -177,6 +194,37 @@ pub const SCID_VERSION: u16 = 400;
 /// | 20-127 | 108  | description    |
 /// | 128-181| 54   | custom_flags   |
 ///
+/// # Complete SI4 File Structure
+///
+/// ```text
+/// ┌─────────────────────────────────────────────────────────────┐
+/// │ HEADER (182 bytes)                                          │
+/// │   Bytes 0-7:    Magic "Scid.si\0"                          │
+/// │   Bytes 8-9:    Version (big-endian u16, typically 400)    │
+/// │   Bytes 10-13:  Base type (big-endian u32)                 │
+/// │   Bytes 14-16:  Number of games (24-bit big-endian)        │
+/// │   Bytes 17-19:  Auto-load game number (24-bit big-endian)  │
+/// │   Bytes 20-127: Description (UTF-8, null-padded)           │
+/// │   Bytes 128-181: Custom flag names (6 × 9 bytes each)      │
+/// ├─────────────────────────────────────────────────────────────┤
+/// │ INDEX ENTRIES (47 bytes × num_games)                        │
+/// │   Each entry contains game metadata (see GameIndexEntry)    │
+/// │   Games are stored in insertion order (game 0, 1, 2, ...)   │
+/// ├─────────────────────────────────────────────────────────────┤
+/// │ SORTING INDEX (4 bytes × num_games) - OPTIONAL              │
+/// │   Array of 32-bit game numbers in sorted order              │
+/// │   Allows iteration in a specific sort order without         │
+/// │   re-sorting the index entries                              │
+/// │                                                             │
+/// │   Example: If sorting_index = [3, 1, 0, 2], then:          │
+/// │   - First in sorted order: game 3                           │
+/// │   - Second in sorted order: game 1                          │
+/// │   - etc.                                                    │
+/// │                                                             │
+/// │   This section may be absent in older databases             │
+/// └─────────────────────────────────────────────────────────────┘
+/// ```
+///
 /// See SCID_DATABASE_FORMAT.md lines 85-96 for complete specification.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Si4Header {
@@ -201,11 +249,16 @@ pub struct Si4Header {
     /// UTF-8 string, null-terminated, max 108 bytes.
     pub description: String,
 
-    /// Custom flag descriptions (6 flags × 9 bytes each)
+    /// Custom flag names (6 user-defined flags)
     ///
-    /// User-defined flag meanings. Usually empty.
-    pub custom_flags: [String; 6],
+    /// SCID allows users to define 6 custom flags with names up to 8 characters.
+    /// These correspond to game_flags::CUSTOM_FLAG_1 through CUSTOM_FLAG_6.
+    /// Empty strings indicate unnamed/unused flags.
+    pub custom_flag_names: [String; 6],
 }
+
+/// Size of each custom flag name field in the header
+const CUSTOM_FLAG_NAME_SIZE: usize = 9; // 8 chars + null terminator
 
 impl Si4Header {
     /// Create a new header with default values (for testing)
@@ -216,7 +269,7 @@ impl Si4Header {
             num_games: 0,
             auto_load: 0,
             description: String::new(),
-            custom_flags: Default::default(),
+            custom_flag_names: Default::default(),
         }
     }
 
@@ -231,6 +284,18 @@ impl Si4Header {
         self.description = description.into();
         self
     }
+
+    /// Get the name for a custom flag (1-6)
+    ///
+    /// Returns None if flag_num is out of range.
+    /// Returns empty string if flag is not named.
+    pub fn get_custom_flag_name(&self, flag_num: u8) -> Option<&str> {
+        if flag_num >= 1 && flag_num <= 6 {
+            Some(&self.custom_flag_names[(flag_num - 1) as usize])
+        } else {
+            None
+        }
+    }
 }
 
 impl Default for Si4Header {
@@ -238,6 +303,463 @@ impl Default for Si4Header {
         Self::new()
     }
 }
+
+/// Game flags module
+///
+/// SCID uses a 16-bit flags field to store various game attributes.
+/// The flags are stored in bytes 7-8 of each game index entry.
+pub mod game_flags {
+    /// Game has a non-standard starting position (custom FEN)
+    pub const START_FLAG: u16 = 1 << 0;
+
+    /// Game contains pawn promotions
+    pub const PROMO_FLAG: u16 = 1 << 1;
+
+    /// Game contains underpromotions (promotion to non-queen)
+    pub const UNDER_PROMO_FLAG: u16 = 1 << 2;
+
+    /// Game is marked for deletion
+    pub const DELETE_FLAG: u16 = 1 << 3;
+
+    /// White is missing opening theory (marked by user)
+    pub const WHITE_OP_FLAG: u16 = 1 << 4;
+
+    /// Black is missing opening theory (marked by user)
+    pub const BLACK_OP_FLAG: u16 = 1 << 5;
+
+    /// Game contains middle-game annotation
+    pub const MIDDLEGAME_FLAG: u16 = 1 << 6;
+
+    /// Game contains endgame annotation
+    pub const ENDGAME_FLAG: u16 = 1 << 7;
+
+    /// Game contains novelty move
+    pub const NOVELTY_FLAG: u16 = 1 << 8;
+
+    /// Game is pawn structure study
+    pub const PAWN_FLAG: u16 = 1 << 9;
+
+    /// Custom flag 1 (user-defined, name from header)
+    pub const CUSTOM_FLAG_1: u16 = 1 << 10;
+
+    /// Custom flag 2 (user-defined, name from header)
+    pub const CUSTOM_FLAG_2: u16 = 1 << 11;
+
+    /// Custom flag 3 (user-defined, name from header)
+    pub const CUSTOM_FLAG_3: u16 = 1 << 12;
+
+    /// Custom flag 4 (user-defined, name from header)
+    pub const CUSTOM_FLAG_4: u16 = 1 << 13;
+
+    /// Custom flag 5 (user-defined, name from header)
+    pub const CUSTOM_FLAG_5: u16 = 1 << 14;
+
+    /// Custom flag 6 (user-defined, name from header)
+    pub const CUSTOM_FLAG_6: u16 = 1 << 15;
+
+    /// All custom flag bits (flags 1-6)
+    pub const ALL_CUSTOM_FLAGS: u16 = CUSTOM_FLAG_1 | CUSTOM_FLAG_2 | CUSTOM_FLAG_3
+                                     | CUSTOM_FLAG_4 | CUSTOM_FLAG_5 | CUSTOM_FLAG_6;
+
+    /// Get the bit mask for a custom flag (1-6)
+    pub const fn custom_flag_mask(flag_num: u8) -> Option<u16> {
+        match flag_num {
+            1 => Some(CUSTOM_FLAG_1),
+            2 => Some(CUSTOM_FLAG_2),
+            3 => Some(CUSTOM_FLAG_3),
+            4 => Some(CUSTOM_FLAG_4),
+            5 => Some(CUSTOM_FLAG_5),
+            6 => Some(CUSTOM_FLAG_6),
+            _ => None,
+        }
+    }
+}
+
+/// Extended game flags (stored in separate field, typically byte 6)
+///
+/// These flags are stored separately from the main 16-bit flags field.
+/// The FLAG_PACKED flag is CRITICAL - it indicates the game data is
+/// compressed with zlib and MUST be decompressed before parsing moves.
+///
+/// See SCID_DATABASE_FORMAT.md and scidvspc codec_scid4.cpp for details.
+pub mod extended_game_flags {
+    /// Game data is zlib compressed (CRITICAL!)
+    ///
+    /// When this flag is set, the game data in .sg4 MUST be decompressed
+    /// using zlib before parsing. Most real-world SCID databases use
+    /// compression, so this is essential for proper parsing.
+    ///
+    /// # Implementation
+    ///
+    /// ```rust
+    /// use flate2::read::ZlibDecoder;
+    ///
+    /// if entry.is_packed() {
+    ///     let decoder = ZlibDecoder::new(&compressed_data[..]);
+    ///     // Read decompressed data...
+    /// }
+    /// ```
+    ///
+    /// See Phase 4 for complete decompression implementation.
+    pub const FLAG_PACKED: u8 = 0x80;  // Bit 7 of length_high byte
+}
+
+/// Rating type enumeration (Gap 15)
+///
+/// SCID stores ratings with a 4-bit type indicator in the high bits.
+/// This allows distinguishing between different rating systems.
+///
+/// # Encoding
+///
+/// Rating values are stored as 16-bit values:
+/// - Bits 15-12: Rating type (0-15)
+/// - Bits 11-0: Rating value (0-4095)
+///
+/// # Example
+///
+/// ```rust
+/// let raw_rating: u16 = 0x1944; // Type 1 (Elo), value 2372
+/// let rating_type = RatingType::from_u8((raw_rating >> 12) as u8);
+/// let rating_value = raw_rating & 0x0FFF;
+/// assert_eq!(rating_type, RatingType::Elo);
+/// assert_eq!(rating_value, 2372);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum RatingType {
+    /// No rating type specified (value 0)
+    None = 0,
+
+    /// Standard Elo rating (most common)
+    Elo = 1,
+
+    /// Rapid chess rating
+    Rapid = 2,
+
+    /// ICCF (International Correspondence Chess Federation) rating
+    Iccf = 3,
+
+    /// USCF (United States Chess Federation) rating
+    Uscf = 4,
+
+    /// DWZ (Deutsche Wertungszahl) - German rating system
+    Dwz = 5,
+
+    /// ECF (English Chess Federation) rating
+    Ecf = 6,
+
+    /// Unknown or unsupported rating type
+    Unknown = 255,
+}
+
+impl RatingType {
+    /// Convert from raw u8 value to RatingType
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - The 4-bit rating type value (0-15)
+    ///
+    /// # Returns
+    ///
+    /// The corresponding RatingType enum variant
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            0 => RatingType::None,
+            1 => RatingType::Elo,
+            2 => RatingType::Rapid,
+            3 => RatingType::Iccf,
+            4 => RatingType::Uscf,
+            5 => RatingType::Dwz,
+            6 => RatingType::Ecf,
+            _ => RatingType::Unknown,
+        }
+    }
+
+    /// Convert to a human-readable string for PGN output
+    ///
+    /// Returns None for RatingType::None (no rating type to display)
+    pub fn to_pgn_suffix(&self) -> Option<&'static str> {
+        match self {
+            RatingType::None => None,
+            RatingType::Elo => Some("Elo"),
+            RatingType::Rapid => Some("Rapid"),
+            RatingType::Iccf => Some("ICCF"),
+            RatingType::Uscf => Some("USCF"),
+            RatingType::Dwz => Some("DWZ"),
+            RatingType::Ecf => Some("ECF"),
+            RatingType::Unknown => Some("Rating"),
+        }
+    }
+
+    /// Check if this is a valid/known rating type
+    pub fn is_known(&self) -> bool {
+        !matches!(self, RatingType::Unknown)
+    }
+}
+
+impl Default for RatingType {
+    fn default() -> Self {
+        RatingType::None
+    }
+}
+
+/// Parse a raw rating value into type and value components
+///
+/// # Arguments
+///
+/// * `raw` - The raw 16-bit rating value from the index entry
+///
+/// # Returns
+///
+/// Tuple of (rating_type, rating_value)
+///
+/// # Example
+///
+/// ```rust
+/// let (rating_type, value) = parse_rating(0x1944);
+/// assert_eq!(rating_type, RatingType::Elo);
+/// assert_eq!(value, 2372);
+/// ```
+pub fn parse_rating(raw: u16) -> (RatingType, u16) {
+    let rating_type = RatingType::from_u8((raw >> 12) as u8);
+    let rating_value = raw & 0x0FFF;
+    (rating_type, rating_value)
+}
+
+/// Material signature encoding (Gap 16)
+///
+/// A compact 24-bit encoding of the material (pieces) in the final position.
+/// Used for material-based position searches and database integrity checks.
+///
+/// # Bit Layout (24 bits used of 32-bit field)
+///
+/// ```text
+/// Bits 22-23 (2): White Queens  (0-3)
+/// Bits 20-21 (2): White Rooks   (0-3)
+/// Bits 18-19 (2): White Bishops (0-3)
+/// Bits 16-17 (2): White Knights (0-3)
+/// Bits 12-15 (4): White Pawns   (0-15)
+/// Bits 10-11 (2): Black Queens  (0-3)
+/// Bits  8-9  (2): Black Rooks   (0-3)
+/// Bits  6-7  (2): Black Bishops (0-3)
+/// Bits  4-5  (2): Black Knights (0-3)
+/// Bits  0-3  (4): Black Pawns   (0-15)
+/// ```
+///
+/// # Notes
+///
+/// - Kings are not included (always 1 per side in valid positions)
+/// - Pawns use 4 bits (0-15) to handle promotion edge cases
+/// - Pieces use 2 bits (0-3) to handle promotion edge cases
+/// - Standard starting position: `0x00FF8888` (Q:1, R:2, B:2, N:2, P:8 each side)
+///
+/// # Example
+///
+/// ```rust
+/// let sig = MaterialSignature::from_raw(0x00FF8888);
+/// assert_eq!(sig.white_pawns(), 8);
+/// assert_eq!(sig.white_queens(), 1);
+/// assert_eq!(sig.to_string(), "QRRBBNNPPPPPPPP:qrrbbnnpppppppp");
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MaterialSignature {
+    raw: u32,
+}
+
+// Bit shift positions for each piece type
+mod matsig_shifts {
+    pub const BP: u32 = 0;   // Black Pawns:   bits 0-3
+    pub const BN: u32 = 4;   // Black Knights: bits 4-5
+    pub const BB: u32 = 6;   // Black Bishops: bits 6-7
+    pub const BR: u32 = 8;   // Black Rooks:   bits 8-9
+    pub const BQ: u32 = 10;  // Black Queens:  bits 10-11
+    pub const WP: u32 = 12;  // White Pawns:   bits 12-15
+    pub const WN: u32 = 16;  // White Knights: bits 16-17
+    pub const WB: u32 = 18;  // White Bishops: bits 18-19
+    pub const WR: u32 = 20;  // White Rooks:   bits 20-21
+    pub const WQ: u32 = 22;  // White Queens:  bits 22-23
+}
+
+// Bit masks for each piece type
+mod matsig_masks {
+    pub const BP: u32 = 0x0000_000F;  // 4 bits for pawns
+    pub const BN: u32 = 0x0000_0030;  // 2 bits
+    pub const BB: u32 = 0x0000_00C0;  // 2 bits
+    pub const BR: u32 = 0x0000_0300;  // 2 bits
+    pub const BQ: u32 = 0x0000_0C00;  // 2 bits
+    pub const WP: u32 = 0x0000_F000;  // 4 bits for pawns
+    pub const WN: u32 = 0x0003_0000;  // 2 bits
+    pub const WB: u32 = 0x000C_0000;  // 2 bits
+    pub const WR: u32 = 0x0030_0000;  // 2 bits
+    pub const WQ: u32 = 0x00C0_0000;  // 2 bits
+}
+
+/// Standard starting position material signature
+///
+/// Each side has: 1 Queen, 2 Rooks, 2 Bishops, 2 Knights, 8 Pawns
+pub const MATSIG_STANDARD_START: u32 = 0x00FF_8888;
+
+/// Empty board material signature
+pub const MATSIG_EMPTY: u32 = 0;
+
+impl MaterialSignature {
+    /// Create from raw 32-bit value (as stored in index entry)
+    pub fn from_raw(raw: u32) -> Self {
+        // Only lower 24 bits are used
+        Self { raw: raw & 0x00FF_FFFF }
+    }
+
+    /// Get the raw 32-bit value
+    pub fn raw(&self) -> u32 {
+        self.raw
+    }
+
+    /// Check if this is the standard starting position material
+    pub fn is_standard_start(&self) -> bool {
+        self.raw == MATSIG_STANDARD_START
+    }
+
+    /// Check if the board is empty (no pieces)
+    pub fn is_empty(&self) -> bool {
+        self.raw == MATSIG_EMPTY
+    }
+
+    // ========== White piece counts ==========
+
+    /// Get white queen count (0-3)
+    #[inline]
+    pub fn white_queens(&self) -> u8 {
+        ((self.raw & matsig_masks::WQ) >> matsig_shifts::WQ) as u8
+    }
+
+    /// Get white rook count (0-3)
+    #[inline]
+    pub fn white_rooks(&self) -> u8 {
+        ((self.raw & matsig_masks::WR) >> matsig_shifts::WR) as u8
+    }
+
+    /// Get white bishop count (0-3)
+    #[inline]
+    pub fn white_bishops(&self) -> u8 {
+        ((self.raw & matsig_masks::WB) >> matsig_shifts::WB) as u8
+    }
+
+    /// Get white knight count (0-3)
+    #[inline]
+    pub fn white_knights(&self) -> u8 {
+        ((self.raw & matsig_masks::WN) >> matsig_shifts::WN) as u8
+    }
+
+    /// Get white pawn count (0-15)
+    #[inline]
+    pub fn white_pawns(&self) -> u8 {
+        ((self.raw & matsig_masks::WP) >> matsig_shifts::WP) as u8
+    }
+
+    // ========== Black piece counts ==========
+
+    /// Get black queen count (0-3)
+    #[inline]
+    pub fn black_queens(&self) -> u8 {
+        ((self.raw & matsig_masks::BQ) >> matsig_shifts::BQ) as u8
+    }
+
+    /// Get black rook count (0-3)
+    #[inline]
+    pub fn black_rooks(&self) -> u8 {
+        ((self.raw & matsig_masks::BR) >> matsig_shifts::BR) as u8
+    }
+
+    /// Get black bishop count (0-3)
+    #[inline]
+    pub fn black_bishops(&self) -> u8 {
+        ((self.raw & matsig_masks::BB) >> matsig_shifts::BB) as u8
+    }
+
+    /// Get black knight count (0-3)
+    #[inline]
+    pub fn black_knights(&self) -> u8 {
+        ((self.raw & matsig_masks::BN) >> matsig_shifts::BN) as u8
+    }
+
+    /// Get black pawn count (0-15)
+    #[inline]
+    pub fn black_pawns(&self) -> u8 {
+        ((self.raw & matsig_masks::BP) >> matsig_shifts::BP) as u8
+    }
+
+    // ========== Aggregate helpers ==========
+
+    /// Check if position has any queens
+    pub fn has_queens(&self) -> bool {
+        (self.raw & (matsig_masks::WQ | matsig_masks::BQ)) != 0
+    }
+
+    /// Check if position has any rooks
+    pub fn has_rooks(&self) -> bool {
+        (self.raw & (matsig_masks::WR | matsig_masks::BR)) != 0
+    }
+
+    /// Check if position has any bishops
+    pub fn has_bishops(&self) -> bool {
+        (self.raw & (matsig_masks::WB | matsig_masks::BB)) != 0
+    }
+
+    /// Check if position has any knights
+    pub fn has_knights(&self) -> bool {
+        (self.raw & (matsig_masks::WN | matsig_masks::BN)) != 0
+    }
+
+    /// Check if position has any pawns
+    pub fn has_pawns(&self) -> bool {
+        (self.raw & (matsig_masks::WP | matsig_masks::BP)) != 0
+    }
+
+    /// Get total white material (excluding king)
+    pub fn white_total(&self) -> u8 {
+        self.white_queens() + self.white_rooks() + self.white_bishops()
+            + self.white_knights() + self.white_pawns()
+    }
+
+    /// Get total black material (excluding king)
+    pub fn black_total(&self) -> u8 {
+        self.black_queens() + self.black_rooks() + self.black_bishops()
+            + self.black_knights() + self.black_pawns()
+    }
+
+    /// Convert to SCID-style string representation
+    ///
+    /// Format: "QRRBBNNPPPPPPPP:qrrbbnnpppppppp" (uppercase=white, lowercase=black)
+    /// Each piece letter is repeated by its count.
+    pub fn to_material_string(&self) -> String {
+        let mut s = String::with_capacity(32);
+
+        // White pieces
+        for _ in 0..self.white_queens() { s.push('Q'); }
+        for _ in 0..self.white_rooks() { s.push('R'); }
+        for _ in 0..self.white_bishops() { s.push('B'); }
+        for _ in 0..self.white_knights() { s.push('N'); }
+        for _ in 0..self.white_pawns() { s.push('P'); }
+
+        s.push(':');
+
+        // Black pieces
+        for _ in 0..self.black_queens() { s.push('q'); }
+        for _ in 0..self.black_rooks() { s.push('r'); }
+        for _ in 0..self.black_bishops() { s.push('b'); }
+        for _ in 0..self.black_knights() { s.push('n'); }
+        for _ in 0..self.black_pawns() { s.push('p'); }
+
+        s
+    }
+}
+
+impl std::fmt::Display for MaterialSignature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_material_string())
+    }
+}
+
 ```
 
 2. Update `crates/core/src/database/mod.rs`:
@@ -253,7 +775,7 @@ pub mod names;
 pub mod types;
 
 // Re-exports
-pub use index::{Si4Header, GameIndexEntry};
+pub use index::{Si4Header, GameIndexEntry, game_flags, eco_to_string, RatingType, parse_rating, MaterialSignature, MATSIG_STANDARD_START, MATSIG_EMPTY};
 ```
 
 **Validation**:
@@ -383,12 +905,13 @@ pub fn parse_si4_header(file: &mut File) -> Result<Si4Header> {
         .trim()
         .to_string();
 
-    // Parse custom flags (offset 128-181, six 9-byte strings)
-    let mut custom_flags: [String; 6] = Default::default();
+    // Parse custom flag names (offset 128-181, six 9-byte strings)
+    // Each flag name is 9 bytes (8 chars + null terminator)
+    let mut custom_flag_names: [String; 6] = Default::default();
     for i in 0..6 {
-        let start = 128 + (i * 9);
-        let end = start + 9;
-        custom_flags[i] = String::from_utf8_lossy(&header_bytes[start..end])
+        let start = 128 + (i * CUSTOM_FLAG_NAME_SIZE);
+        let end = start + CUSTOM_FLAG_NAME_SIZE;
+        custom_flag_names[i] = String::from_utf8_lossy(&header_bytes[start..end])
             .chars()
             .filter(|&c| c >= ' ')
             .collect::<String>()
@@ -402,7 +925,7 @@ pub fn parse_si4_header(file: &mut File) -> Result<Si4Header> {
         num_games,
         auto_load,
         description,
-        custom_flags,
+        custom_flag_names,
     })
 }
 ```
@@ -512,7 +1035,7 @@ mod tests {
 ```rust
 //! Integration tests for SI4 index file parsing
 //!
-//! These tests require actual SCID database files in test/data/
+//! These tests require actual SCID database files in tests/data/
 
 use scidtopgn_core::database::index::{parse_si4_header, SCID_VERSION};
 use std::fs::File;
@@ -521,7 +1044,7 @@ use std::path::PathBuf;
 /// Get path to test data file
 fn test_data_path(filename: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../test/data")
+        .join("../../tests/data")
         .join(filename)
 }
 
@@ -585,7 +1108,7 @@ cargo test -p scidtopgn-core test_parse_five_si4_header
 ### Task 2.1.4: Add Test Data Files
 
 **Acceptance Criteria**:
-- `test/data/` directory exists
+- `tests/data/` directory exists
 - `five.si4` test file present (if available)
 - Test data documented
 - `.gitignore` updated to track test files
@@ -594,10 +1117,10 @@ cargo test -p scidtopgn-core test_parse_five_si4_header
 
 1. Create test data directory:
    ```bash
-   mkdir -p test/data
+   mkdir -p tests/data
    ```
 
-2. Add note about test data in `test/data/README.md`:
+2. Add note about test data in `tests/data/README.md`:
 
 ```markdown
 # Test Data
@@ -635,12 +1158,12 @@ Add to `.gitignore`:
 ```gitignore
 # Test databases (large files - optionally track)
 # Uncomment to ignore:
-# /test/data/*.si4
-# /test/data/*.sn4
-# /test/data/*.sg4
+# /tests/data/*.si4
+# /tests/data/*.sn4
+# /tests/data/*.sg4
 
 # But track README
-!/test/data/README.md
+!/tests/data/README.md
 ```
 
 **Note**: If you don't have five.si4 yet, tests will skip gracefully. We'll add it when available.
@@ -649,7 +1172,7 @@ Add to `.gitignore`:
 
 ```bash
 # Check directory exists
-ls -la test/data/
+ls -la tests/data/
 
 # Should show:
 # drwxr-xr-x  README.md
@@ -766,11 +1289,13 @@ pub struct GameIndexEntry {
     /// Black player ELO rating (12-bit value, 0-4095)
     pub black_elo: u16,
 
-    /// White rating type (4-bit value: 0=None, 1=Elo, 2=FIDE, etc.)
-    pub white_rating_type: u8,
+    /// White rating type (4-bit value: 0=None, 1=Elo, 2=Rapid, etc.)
+    /// Use `white_rating_type()` method for the enum version.
+    pub white_rating_type_raw: u8,
 
     /// Black rating type (4-bit value)
-    pub black_rating_type: u8,
+    /// Use `black_rating_type()` method for the enum version.
+    pub black_rating_type_raw: u8,
 
     /// ECO opening code
     pub eco_code: u16,
@@ -792,6 +1317,12 @@ pub struct GameIndexEntry {
 
     /// Material signature of final position
     pub final_material_signature: u32,
+
+    /// Game data is zlib compressed (from length_high byte bit 7)
+    ///
+    /// **CRITICAL**: When true, game data MUST be decompressed before parsing!
+    /// Most real SCID databases use compression.
+    pub packed: bool,
 }
 
 impl GameIndexEntry {
@@ -810,8 +1341,8 @@ impl GameIndexEntry {
             result: GameResult::Unknown,
             white_elo: 0,
             black_elo: 0,
-            white_rating_type: 0,
-            black_rating_type: 0,
+            white_rating_type_raw: 0,
+            black_rating_type_raw: 0,
             eco_code: 0,
             half_moves: 0,
             variation_count: 0,
@@ -819,8 +1350,192 @@ impl GameIndexEntry {
             nag_count: 0,
             flags: 0,
             final_material_signature: 0,
+            packed: false,
         }
     }
+
+    // ========== Flag Helper Methods ==========
+
+    /// Check if a flag is set
+    #[inline]
+    pub fn has_flag(&self, flag: u16) -> bool {
+        (self.flags & flag) != 0
+    }
+
+    /// Check if game is marked for deletion
+    #[inline]
+    pub fn is_deleted(&self) -> bool {
+        self.has_flag(game_flags::DELETE_FLAG)
+    }
+
+    /// Check if game has a custom starting position (non-standard FEN)
+    #[inline]
+    pub fn has_custom_start(&self) -> bool {
+        self.has_flag(game_flags::START_FLAG)
+    }
+
+    /// Check if game contains pawn promotions
+    #[inline]
+    pub fn has_promotions(&self) -> bool {
+        self.has_flag(game_flags::PROMO_FLAG)
+    }
+
+    /// Check if game contains underpromotions (non-queen promotions)
+    #[inline]
+    pub fn has_underpromotions(&self) -> bool {
+        self.has_flag(game_flags::UNDER_PROMO_FLAG)
+    }
+
+    /// Check if a custom flag (1-6) is set
+    pub fn has_custom_flag(&self, flag_num: u8) -> bool {
+        match game_flags::custom_flag_mask(flag_num) {
+            Some(mask) => self.has_flag(mask),
+            None => false,
+        }
+    }
+
+    // ========== Compression Detection ==========
+
+    /// Check if game data is zlib compressed
+    ///
+    /// **CRITICAL**: When this returns true, the game data in .sg4 MUST be
+    /// decompressed using zlib before parsing moves. Most real-world SCID
+    /// databases use compression.
+    ///
+    /// The packed flag is stored in bit 7 of the `length_high` byte (byte 6
+    /// of the index entry), which is the same byte that contains bit 16 of
+    /// the game length.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// if entry.is_packed() {
+    ///     let decompressed = decompress_game_data(&raw_game_bytes)?;
+    ///     parse_moves(&decompressed)?;
+    /// } else {
+    ///     parse_moves(&raw_game_bytes)?;
+    /// }
+    /// ```
+    #[inline]
+    pub fn is_packed(&self) -> bool {
+        self.packed
+    }
+
+    // ========== Rating Type Helpers (Gap 15) ==========
+
+    /// Get white player's rating type as enum
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let entry = parse_game_index_entry(&bytes)?;
+    /// match entry.white_rating_type() {
+    ///     RatingType::Elo => println!("White Elo: {}", entry.white_elo),
+    ///     RatingType::Uscf => println!("White USCF: {}", entry.white_elo),
+    ///     RatingType::None => println!("White rating not specified"),
+    ///     _ => println!("White rating ({}): {}", entry.white_rating_type().to_pgn_suffix().unwrap_or(""), entry.white_elo),
+    /// }
+    /// ```
+    pub fn white_rating_type(&self) -> RatingType {
+        RatingType::from_u8(self.white_rating_type_raw)
+    }
+
+    /// Get black player's rating type as enum
+    pub fn black_rating_type(&self) -> RatingType {
+        RatingType::from_u8(self.black_rating_type_raw)
+    }
+
+    /// Get white rating with type information
+    ///
+    /// Returns tuple of (rating_type, rating_value)
+    pub fn white_rating(&self) -> (RatingType, u16) {
+        (self.white_rating_type(), self.white_elo)
+    }
+
+    /// Get black rating with type information
+    ///
+    /// Returns tuple of (rating_type, rating_value)
+    pub fn black_rating(&self) -> (RatingType, u16) {
+        (self.black_rating_type(), self.black_elo)
+    }
+
+    /// Check if white has a valid rating
+    pub fn has_white_rating(&self) -> bool {
+        self.white_elo > 0
+    }
+
+    /// Check if black has a valid rating
+    pub fn has_black_rating(&self) -> bool {
+        self.black_elo > 0
+    }
+
+    // ========== Material Signature Helper (Gap 16) ==========
+
+    /// Get the final position's material signature as a structured type
+    ///
+    /// The material signature encodes piece counts for both sides and can be
+    /// used for material-based searches or database integrity verification.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let entry = parse_game_index_entry(&bytes)?;
+    /// let mat = entry.material_signature();
+    ///
+    /// if mat.is_standard_start() {
+    ///     println!("Game ended with starting material (no captures)");
+    /// }
+    ///
+    /// println!("Final material: {}", mat); // e.g., "QRRBBNNPPPPPPPP:qrrbbnnpppppppp"
+    /// ```
+    pub fn material_signature(&self) -> MaterialSignature {
+        MaterialSignature::from_raw(self.final_material_signature)
+    }
+
+    // ========== ECO Code Helper ==========
+
+    /// Get ECO code as string (e.g., "A00", "B12", "E99")
+    ///
+    /// ECO codes are encoded as: `letter_index * 100 + number`
+    /// - Letter index: 0=A, 1=B, 2=C, 3=D, 4=E
+    /// - Number: 00-99
+    ///
+    /// Returns None if eco_code is 0 (no ECO assigned)
+    pub fn eco_to_string(&self) -> Option<String> {
+        eco_to_string(self.eco_code)
+    }
+}
+
+/// Convert an ECO code value to its string representation
+///
+/// ECO codes are encoded as: `letter_index * 100 + number`
+/// - Letter index: 0=A, 1=B, 2=C, 3=D, 4=E
+/// - Number: 00-99
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(eco_to_string(0), None);
+/// assert_eq!(eco_to_string(1), Some("A01".to_string()));
+/// assert_eq!(eco_to_string(100), Some("B00".to_string()));
+/// assert_eq!(eco_to_string(199), Some("B99".to_string()));
+/// assert_eq!(eco_to_string(499), Some("E99".to_string()));
+/// ```
+pub fn eco_to_string(eco_code: u16) -> Option<String> {
+    if eco_code == 0 {
+        return None;
+    }
+
+    let letter_index = (eco_code / 100) as u8;
+    let number = (eco_code % 100) as u8;
+
+    // ECO letters are A-E (indices 0-4)
+    if letter_index > 4 {
+        return None; // Invalid ECO code
+    }
+
+    let letter = (b'A' + letter_index) as char;
+    Some(format!("{}{:02}", letter, number))
 }
 
 impl Default for GameIndexEntry {
@@ -891,9 +1606,25 @@ pub fn parse_game_index_entry(bytes: &[u8]) -> Result<GameIndexEntry> {
 
     // Parse game length (17-bit value split across bytes 4-6)
     // See SCID_DATABASE_FORMAT.md lines 148-157
+    //
+    // Byte 6 format:
+    //   Bit 7: FLAG_PACKED (game data is zlib compressed)
+    //   Bit 6-0: Other flags/unused
+    //
+    // Length encoding:
+    //   Bits 0-15: length_low (bytes 4-5)
+    //   Bit 16: ACTUALLY bit 0 of byte 6, NOT bit 7!
+    //
+    // IMPORTANT: Bit 7 of byte 6 is the PACKED flag, not part of length!
     let length_low = u16::from_be_bytes([bytes[4], bytes[5]]) as u32;
     let length_high = bytes[6];
-    let game_length = length_low | (((length_high & 0x80) as u32) << 9);
+
+    // Extract packed flag (bit 7) - CRITICAL for decompression!
+    let packed = (length_high & 0x80) != 0;
+
+    // Game length uses bit 0 of byte 6, not bit 7
+    // (Bit 7 is the packed flag, which we already extracted)
+    let game_length = length_low | (((length_high & 0x01) as u32) << 16);
 
     // Parse game flags (bytes 7-8, BIG-ENDIAN u16)
     let flags = u16::from_be_bytes([bytes[7], bytes[8]]);
@@ -904,6 +1635,7 @@ pub fn parse_game_index_entry(bytes: &[u8]) -> Result<GameIndexEntry> {
     entry.game_offset = game_offset;
     entry.game_length = game_length;
     entry.flags = flags;
+    entry.packed = packed;  // CRITICAL: Indicates zlib compression
 
     Ok(entry)
 }
@@ -1132,12 +1864,33 @@ cargo test -p scidtopgn-core test_parse_event_site_round_ids
 /// - Bits 8-5: Month (1-12)
 /// - Bits 4-0: Day (1-31)
 ///
-/// Year offset encoding: `stored = (event_year - game_year + 4) & 0x7`
-/// Year decoding: `event_year = game_year + stored - 4`
+/// ## Year Offset Encoding (CRITICAL)
 ///
-/// Special values:
-/// - Event date = 0: No event date
-/// - Year offset = 0: Invalid event date
+/// The event year is stored as a 3-bit offset relative to the game year.
+/// This allows events up to 3 years before or after the game.
+///
+/// **Encoding formula**: `stored_offset = (event_year - game_year + 4) & 0x7`
+/// **Decoding formula**: `event_year = game_year + stored_offset - 4`
+///
+/// ### Year Offset Examples
+///
+/// | Event Year | Game Year | Difference | Stored Offset | Decoded Year |
+/// |------------|-----------|------------|---------------|--------------|
+/// | 2020       | 2023      | -3         | 1 (=-3+4)     | 2023+1-4=2020|
+/// | 2021       | 2023      | -2         | 2 (=-2+4)     | 2023+2-4=2021|
+/// | 2022       | 2023      | -1         | 3 (=-1+4)     | 2023+3-4=2022|
+/// | 2023       | 2023      | 0          | 4 (=0+4)      | 2023+4-4=2023|
+/// | 2024       | 2023      | +1         | 5 (=1+4)      | 2023+5-4=2024|
+/// | 2025       | 2023      | +2         | 6 (=2+4)      | 2023+6-4=2025|
+/// | 2026       | 2023      | +3         | 7 (=3+4)      | 2023+7-4=2026|
+///
+/// ### Special Values
+///
+/// - **Event date = 0**: No event date stored (entire 12-bit field is zero)
+/// - **Year offset = 0**: Invalid/no event date (reserved value)
+///
+/// The offset of 4 is the "center point" meaning same year as game.
+/// Valid offsets are 1-7, allowing events from 3 years before to 3 years after.
 ///
 /// See SCID_DATABASE_FORMAT.md lines 211-313 for complete specification.
 fn parse_dates_field(dates_field: u32) -> (GameDate, Option<GameDate>) {
@@ -1365,8 +2118,8 @@ cargo test -p scidtopgn-core test_parse_dates
     entry.eco_code = eco_code;
     entry.white_elo = white_elo;
     entry.black_elo = black_elo;
-    entry.white_rating_type = white_rating_type;
-    entry.black_rating_type = black_rating_type;
+    entry.white_rating_type_raw = white_rating_type;
+    entry.black_rating_type_raw = black_rating_type;
     entry.final_material_signature = final_material_signature;
     entry.half_moves = half_moves;
 
@@ -1404,16 +2157,210 @@ fn test_parse_elo_ratings() {
     // Encoded: (1 << 12) | 2372 = 0x1944
     bytes[29..31].copy_from_slice(&0x1944u16.to_be_bytes());
 
-    // Black ELO: 2500, Type: 2 (FIDE)
+    // Black ELO: 2500, Type: 2 (Rapid)
     // Encoded: (2 << 12) | 2500 = 0x29C4
     bytes[31..33].copy_from_slice(&0x29C4u16.to_be_bytes());
 
     let entry = parse_game_index_entry(&bytes).unwrap();
 
     assert_eq!(entry.white_elo, 2372);
-    assert_eq!(entry.white_rating_type, 1);
+    assert_eq!(entry.white_rating_type_raw, 1);
     assert_eq!(entry.black_elo, 2500);
-    assert_eq!(entry.black_rating_type, 2);
+    assert_eq!(entry.black_rating_type_raw, 2);
+}
+
+#[test]
+fn test_rating_type_enum() {
+    // Test RatingType::from_u8
+    assert_eq!(RatingType::from_u8(0), RatingType::None);
+    assert_eq!(RatingType::from_u8(1), RatingType::Elo);
+    assert_eq!(RatingType::from_u8(2), RatingType::Rapid);
+    assert_eq!(RatingType::from_u8(3), RatingType::Iccf);
+    assert_eq!(RatingType::from_u8(4), RatingType::Uscf);
+    assert_eq!(RatingType::from_u8(5), RatingType::Dwz);
+    assert_eq!(RatingType::from_u8(6), RatingType::Ecf);
+    assert_eq!(RatingType::from_u8(7), RatingType::Unknown);
+    assert_eq!(RatingType::from_u8(255), RatingType::Unknown);
+}
+
+#[test]
+fn test_rating_type_pgn_suffix() {
+    assert_eq!(RatingType::None.to_pgn_suffix(), None);
+    assert_eq!(RatingType::Elo.to_pgn_suffix(), Some("Elo"));
+    assert_eq!(RatingType::Rapid.to_pgn_suffix(), Some("Rapid"));
+    assert_eq!(RatingType::Iccf.to_pgn_suffix(), Some("ICCF"));
+    assert_eq!(RatingType::Uscf.to_pgn_suffix(), Some("USCF"));
+    assert_eq!(RatingType::Dwz.to_pgn_suffix(), Some("DWZ"));
+    assert_eq!(RatingType::Ecf.to_pgn_suffix(), Some("ECF"));
+    assert_eq!(RatingType::Unknown.to_pgn_suffix(), Some("Rating"));
+}
+
+#[test]
+fn test_parse_rating_function() {
+    // Test the parse_rating helper function
+    let (rating_type, value) = parse_rating(0x1944); // Type 1 (Elo), value 2372
+    assert_eq!(rating_type, RatingType::Elo);
+    assert_eq!(value, 2372);
+
+    let (rating_type, value) = parse_rating(0x29C4); // Type 2 (Rapid), value 2500
+    assert_eq!(rating_type, RatingType::Rapid);
+    assert_eq!(value, 2500);
+
+    let (rating_type, value) = parse_rating(0x4800); // Type 4 (USCF), value 2048
+    assert_eq!(rating_type, RatingType::Uscf);
+    assert_eq!(value, 2048);
+
+    let (rating_type, value) = parse_rating(0x0000); // Type 0 (None), value 0
+    assert_eq!(rating_type, RatingType::None);
+    assert_eq!(value, 0);
+}
+
+#[test]
+fn test_entry_rating_type_helpers() {
+    let mut bytes = [0u8; 47];
+
+    // White: Elo 2372, Black: USCF 1800
+    bytes[29..31].copy_from_slice(&0x1944u16.to_be_bytes()); // Type 1, value 2372
+    bytes[31..33].copy_from_slice(&0x4708u16.to_be_bytes()); // Type 4, value 1800
+
+    let entry = parse_game_index_entry(&bytes).unwrap();
+
+    // Test helper methods
+    assert_eq!(entry.white_rating_type(), RatingType::Elo);
+    assert_eq!(entry.black_rating_type(), RatingType::Uscf);
+
+    // Test combined rating method
+    let (w_type, w_value) = entry.white_rating();
+    assert_eq!(w_type, RatingType::Elo);
+    assert_eq!(w_value, 2372);
+
+    let (b_type, b_value) = entry.black_rating();
+    assert_eq!(b_type, RatingType::Uscf);
+    assert_eq!(b_value, 1800);
+
+    // Test has_rating methods
+    assert!(entry.has_white_rating());
+    assert!(entry.has_black_rating());
+}
+
+#[test]
+fn test_entry_no_rating() {
+    let bytes = [0u8; 47]; // All zeros
+    let entry = parse_game_index_entry(&bytes).unwrap();
+
+    assert_eq!(entry.white_rating_type(), RatingType::None);
+    assert_eq!(entry.black_rating_type(), RatingType::None);
+    assert!(!entry.has_white_rating());
+    assert!(!entry.has_black_rating());
+}
+
+#[test]
+fn test_material_signature_standard_start() {
+    // Standard starting position: Q:1, R:2, B:2, N:2, P:8 for each side
+    let sig = MaterialSignature::from_raw(MATSIG_STANDARD_START);
+
+    assert!(sig.is_standard_start());
+    assert!(!sig.is_empty());
+
+    // White pieces
+    assert_eq!(sig.white_queens(), 1);
+    assert_eq!(sig.white_rooks(), 2);
+    assert_eq!(sig.white_bishops(), 2);
+    assert_eq!(sig.white_knights(), 2);
+    assert_eq!(sig.white_pawns(), 8);
+
+    // Black pieces
+    assert_eq!(sig.black_queens(), 1);
+    assert_eq!(sig.black_rooks(), 2);
+    assert_eq!(sig.black_bishops(), 2);
+    assert_eq!(sig.black_knights(), 2);
+    assert_eq!(sig.black_pawns(), 8);
+
+    // Aggregates
+    assert_eq!(sig.white_total(), 15); // 1+2+2+2+8
+    assert_eq!(sig.black_total(), 15);
+}
+
+#[test]
+fn test_material_signature_empty() {
+    let sig = MaterialSignature::from_raw(MATSIG_EMPTY);
+
+    assert!(sig.is_empty());
+    assert!(!sig.is_standard_start());
+
+    assert_eq!(sig.white_queens(), 0);
+    assert_eq!(sig.white_pawns(), 0);
+    assert_eq!(sig.black_queens(), 0);
+    assert_eq!(sig.black_pawns(), 0);
+
+    assert!(!sig.has_queens());
+    assert!(!sig.has_pawns());
+}
+
+#[test]
+fn test_material_signature_endgame() {
+    // King + Rook vs King endgame (KR:k)
+    // White: 1 rook, 0 everything else
+    // Black: 0 everything
+    let raw = 0x00_10_00_00u32; // Only WR bit set (bits 20-21 = 1)
+    let sig = MaterialSignature::from_raw(raw);
+
+    assert_eq!(sig.white_rooks(), 1);
+    assert_eq!(sig.white_queens(), 0);
+    assert_eq!(sig.white_pawns(), 0);
+    assert_eq!(sig.black_rooks(), 0);
+
+    assert!(sig.has_rooks());
+    assert!(!sig.has_queens());
+    assert!(!sig.has_pawns());
+}
+
+#[test]
+fn test_material_signature_to_string() {
+    // Standard start
+    let sig = MaterialSignature::from_raw(MATSIG_STANDARD_START);
+    let s = sig.to_material_string();
+    assert_eq!(s, "QRRBBNNPPPPPPPP:qrrbbnnpppppppp");
+
+    // Empty
+    let empty_sig = MaterialSignature::from_raw(MATSIG_EMPTY);
+    assert_eq!(empty_sig.to_material_string(), ":");
+}
+
+#[test]
+fn test_material_signature_bit_layout() {
+    // Test individual bit positions by setting one piece type at a time
+
+    // Black pawn (bits 0-3)
+    let sig = MaterialSignature::from_raw(0x00000005); // 5 black pawns
+    assert_eq!(sig.black_pawns(), 5);
+    assert_eq!(sig.black_knights(), 0);
+
+    // Black knight (bits 4-5)
+    let sig = MaterialSignature::from_raw(0x00000020); // 2 black knights
+    assert_eq!(sig.black_knights(), 2);
+    assert_eq!(sig.black_pawns(), 0);
+
+    // White queen (bits 22-23)
+    let sig = MaterialSignature::from_raw(0x00C00000); // 3 white queens
+    assert_eq!(sig.white_queens(), 3);
+    assert_eq!(sig.white_rooks(), 0);
+}
+
+#[test]
+fn test_entry_material_signature_helper() {
+    let mut bytes = [0u8; 47];
+
+    // Set material signature at bytes 33-36
+    let mat_sig = MATSIG_STANDARD_START;
+    bytes[33..37].copy_from_slice(&mat_sig.to_be_bytes());
+
+    let entry = parse_game_index_entry(&bytes).unwrap();
+    let sig = entry.material_signature();
+
+    assert!(sig.is_standard_start());
+    assert_eq!(sig.white_pawns(), 8);
+    assert_eq!(sig.black_pawns(), 8);
 }
 
 #[test]
@@ -1432,6 +2379,133 @@ fn test_parse_half_moves_10bit() {
     // Expected: 255 | (3 << 8) = 255 + 768 = 1023
     assert_eq!(entry.half_moves, 1023);
 }
+
+#[test]
+fn test_game_flags() {
+    let mut bytes = [0u8; 47];
+
+    // Set flags: DELETE_FLAG (bit 3) and PROMO_FLAG (bit 1)
+    let flags = game_flags::DELETE_FLAG | game_flags::PROMO_FLAG;
+    bytes[7..9].copy_from_slice(&flags.to_be_bytes());
+
+    let entry = parse_game_index_entry(&bytes).unwrap();
+
+    assert!(entry.is_deleted());
+    assert!(entry.has_promotions());
+    assert!(!entry.has_custom_start());
+    assert!(!entry.has_underpromotions());
+}
+
+#[test]
+fn test_custom_flags() {
+    let mut bytes = [0u8; 47];
+
+    // Set custom flag 3 (bit 12)
+    let flags = game_flags::CUSTOM_FLAG_3;
+    bytes[7..9].copy_from_slice(&flags.to_be_bytes());
+
+    let entry = parse_game_index_entry(&bytes).unwrap();
+
+    assert!(!entry.has_custom_flag(1));
+    assert!(!entry.has_custom_flag(2));
+    assert!(entry.has_custom_flag(3));
+    assert!(!entry.has_custom_flag(4));
+    assert!(!entry.has_custom_flag(7)); // Out of range
+}
+
+#[test]
+fn test_packed_flag_detection() {
+    // Test detecting zlib-compressed game data
+    let mut bytes = [0u8; 47];
+
+    // Set FLAG_PACKED (bit 7 of byte 6)
+    bytes[6] = 0x80;
+
+    let entry = parse_game_index_entry(&bytes).unwrap();
+    assert!(entry.is_packed(), "Should detect packed/compressed game");
+
+    // Test without packed flag
+    let mut bytes_uncompressed = [0u8; 47];
+    bytes_uncompressed[6] = 0x00;
+
+    let entry_uncompressed = parse_game_index_entry(&bytes_uncompressed).unwrap();
+    assert!(!entry_uncompressed.is_packed(), "Should not be marked as packed");
+}
+
+#[test]
+fn test_packed_flag_with_length() {
+    // Verify packed flag doesn't interfere with game length parsing
+    let mut bytes = [0u8; 47];
+
+    // Set length_low = 1000 (bytes 4-5)
+    bytes[4..6].copy_from_slice(&1000u16.to_be_bytes());
+
+    // Set byte 6 with BOTH packed flag (bit 7) AND length bit (bit 0)
+    // This tests that we correctly separate the two uses of byte 6
+    bytes[6] = 0x81; // Packed=1, length_high_bit=1
+
+    let entry = parse_game_index_entry(&bytes).unwrap();
+
+    assert!(entry.is_packed(), "Should be marked as packed");
+    // Length should be 1000 + (1 << 16) = 66536
+    assert_eq!(entry.game_length, 1000 + 65536, "Length should include high bit");
+}
+
+#[test]
+fn test_eco_to_string() {
+    // Test basic ECO codes
+    assert_eq!(eco_to_string(0), None); // No ECO
+    assert_eq!(eco_to_string(1), Some("A01".to_string())); // A01
+    assert_eq!(eco_to_string(99), Some("A99".to_string())); // A99
+    assert_eq!(eco_to_string(100), Some("B00".to_string())); // B00
+    assert_eq!(eco_to_string(199), Some("B99".to_string())); // B99
+    assert_eq!(eco_to_string(200), Some("C00".to_string())); // C00
+    assert_eq!(eco_to_string(300), Some("D00".to_string())); // D00
+    assert_eq!(eco_to_string(400), Some("E00".to_string())); // E00
+    assert_eq!(eco_to_string(499), Some("E99".to_string())); // E99
+
+    // Invalid (beyond E99)
+    assert_eq!(eco_to_string(500), None);
+}
+
+#[test]
+fn test_entry_eco_to_string() {
+    let mut entry = GameIndexEntry::new();
+
+    entry.eco_code = 0;
+    assert_eq!(entry.eco_to_string(), None);
+
+    entry.eco_code = 245; // C45 (Scotch Game)
+    assert_eq!(entry.eco_to_string(), Some("C45".to_string()));
+}
+
+#[test]
+fn test_event_date_year_offset() {
+    // Test event date year offset encoding/decoding
+    // Game year: 2023, Event year: 2020 (3 years before)
+
+    let game_year = 2023u32;
+    let game_month = 6u32;
+    let game_day = 15u32;
+    let game_encoded = (game_year << 9) | (game_month << 5) | game_day;
+
+    // Event year 2020 is 3 years before, so offset = -3 + 4 = 1
+    let event_year_offset = 1u32;
+    let event_month = 1u32;
+    let event_day = 1u32;
+    let event_encoded = (event_year_offset << 9) | (event_month << 5) | event_day;
+
+    let dates_field = (event_encoded << 20) | game_encoded;
+
+    let (game_date, event_date) = parse_dates_field(dates_field);
+
+    assert_eq!(game_date.year, 2023);
+    assert!(event_date.is_some());
+    let event = event_date.unwrap();
+    assert_eq!(event.year, 2020); // 2023 + 1 - 4 = 2020
+    assert_eq!(event.month, 1);
+    assert_eq!(event.day, 1);
+}
 ```
 
 **Validation**:
@@ -1440,6 +2514,10 @@ fn test_parse_half_moves_10bit() {
 cargo test -p scidtopgn-core test_parse_result
 cargo test -p scidtopgn-core test_parse_elo
 cargo test -p scidtopgn-core test_parse_half_moves
+cargo test -p scidtopgn-core test_game_flags
+cargo test -p scidtopgn-core test_custom_flags
+cargo test -p scidtopgn-core test_eco_to_string
+cargo test -p scidtopgn-core test_event_date_year_offset
 ```
 
 ---
@@ -1729,7 +2807,7 @@ cargo build --all
 cargo test --all -- --nocapture
 
 # Should see output like:
-# running 25+ tests
+# running 50+ tests
 # test parse_tests::test_parse_game_offset_and_length ... ok
 # test parse_tests::test_parse_17bit_game_length ... ok
 # test parse_tests::test_parse_player_ids ... ok
@@ -1774,7 +2852,7 @@ git commit -m "Complete Phase 2: Index File Parser
 - Date parsing (20-bit + 12-bit)
 - Player/event/site/round ID extraction
 - ELO ratings and result parsing
-- Complete test suite (25+ tests)
+- Complete test suite (50+ tests)
 - Integration tests with five.si4
 - Full documentation
 
@@ -1784,17 +2862,26 @@ Ready for Phase 3: Name File Parser."
 
 **Final Checklist**:
 
-- [ ] Si4Header struct complete
-- [ ] GameIndexEntry struct complete
+- [ ] Si4Header struct complete (with custom_flag_names)
+- [ ] GameIndexEntry struct complete (with flag helpers)
 - [ ] parse_si4_header() implemented and tested
 - [ ] parse_game_index_entry() implemented and tested
+- [ ] game_flags module with all constants
+- [ ] extended_game_flags module with FLAG_PACKED
+- [ ] GameIndexEntry.packed field and is_packed() method
+- [ ] RatingType enum with all rating types (Gap 15)
+- [ ] parse_rating() function and rating type helper methods
+- [ ] MaterialSignature struct with piece count accessors (Gap 16)
+- [ ] material_signature() helper method on GameIndexEntry
+- [ ] eco_to_string() function implemented
 - [ ] All bit packing formulas correct
 - [ ] Date parsing works (offset 25-28)
+- [ ] Year offset encoding documented and tested
 - [ ] Big-endian handling verified
 - [ ] Integration tests with five.si4 passing
 - [ ] Helper functions implemented
 - [ ] Documentation complete
-- [ ] All tests passing (25+)
+- [ ] All tests passing (50+)
 - [ ] No clippy warnings
 - [ ] Code formatted
 - [ ] Git committed
@@ -1811,7 +2898,7 @@ Upon completion of Phase 2:
    - ✅ Dates parse correctly (2022.12.19 for Game 1)
 
 2. **Code Quality**:
-   - ✅ 25+ tests passing
+   - ✅ 50+ tests passing
    - ✅ Zero clippy warnings
    - ✅ Full documentation coverage
 

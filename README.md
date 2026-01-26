@@ -1,107 +1,64 @@
 # SCID to PGN Converter
 
-A command-line tool written in Rust to convert SCID chess databases (.si4/.sg4/.sn4) to PGN format. This also serves as an experiment with vibe coding from an AI skeptic.
+A Rust library and CLI tool for parsing SCID (Shane's Chess Information Database) files and converting them to standard PGN (Portable Game Notation) format.
 
-## Features
+## Project Status
 
-- Convert SCID databases to standard PGN format
-- Support for game metadata (players, events, sites, dates, ratings)
-- Optional inclusion of variations and comments
-- Progress reporting for large databases
-- Force overwrite protection
+🚧 **Under Active Development** - Phase 1 Complete
 
-## Installation
+## Features (Planned)
 
-```bash
-cd scidtopgn
-cargo build --release
-```
-
-The binary will be available at `target/release/scidtopgn`.
-
-## Usage
-
-```bash
-# Convert a SCID database to PGN
-scidtopgn /path/to/database
-
-# Specify output file
-scidtopgn /path/to/database -o output.pgn
-
-# Include variations and comments
-scidtopgn /path/to/database --variations --comments
-
-# Limit number of games exported
-scidtopgn /path/to/database --max-games 1000
-
-# Force overwrite existing output file
-scidtopgn /path/to/database --force
-```
-
-## Arguments
-
-- `DATABASE`: Path to the SCID database (without extension - will look for .si4, .sg4, .sn4)
-- `-o, --output FILE`: Output PGN file (if not specified, uses database name with .pgn extension)
-- `-f, --force`: Force overwrite existing output file
-- `-v, --variations`: Include variations in PGN output
-- `-c, --comments`: Include comments in PGN output
-- `--max-games N`: Maximum number of games to export (0 = all games)
-
-## File Format Support
-
-This tool supports SCID database format version 4, which consists of three files:
-
-- `.si4`: Index file containing meta-information for each game
-- `.sg4`: Game file containing actual moves, variations and comments  
-- `.sn4`: Name file containing player names, tournament names, etc.
-
-## Current Limitations
-
-This is an initial implementation with the following limitations:
-
-1. **Date parsing**: The SCID binary date format is not correctly parsed yet. Dates show as "????.??.??" for now.
-
-2. **Move parsing**: The SCID move encoding is very complex and not fully implemented yet. Games will be exported with metadata but moves are currently placeholders.
-
-3. **Name parsing**: The .sn4 name file parsing is simplified and uses placeholder names.
-
-4. **Variations and comments**: While the structure is in place, full parsing of variations and comments from the .sg4 file is not yet implemented.
-
-## Development Status
-
-This project follows Rust best practices for CLI applications:
-
-- Modular structure with separate modules for SCID parsing and PGN export
-- Error handling using `std::io::Result`
-- Command-line argument parsing with `clap`
-- Proper project structure with `src/`, `Cargo.toml`, etc.
-
-## Contributing
-
-The main areas that need work:
-
-1. **SCID move decoding**: Implement the complex move encoding used by SCID
-2. **Name file parsing**: Properly parse the .sn4 name file format
-3. **Variation support**: Parse and export chess variations
-4. **Comment support**: Parse and export chess comments and annotations
+- Parse SCID database files (.si4, .sn4, .sg4)
+- Extract game metadata (players, dates, ratings, results)
+- Decode chess moves with full position tracking
+- Generate standard PGN output
+- Support for variations and annotations
+- Memory-efficient streaming for large databases
+- Both library and CLI interfaces
 
 ## Architecture
 
+This project uses a workspace structure with two crates:
+
+- `scidtopgn-core` - Library for SCID parsing and PGN generation
+- `scidtopgn` - Command-line interface
+
+## Building
+
+```bash
+# Build all crates
+cargo build
+
+# Build release version
+cargo build --release
+
+# Run tests
+cargo test
+
+# Run CLI (when implemented)
+cargo run --bin scidtopgn -- --help
 ```
-src/
-├── main.rs              # CLI entry point and argument parsing
-├── scid/                # SCID database parsing
-│   ├── mod.rs           # Module exports
-│   ├── database.rs      # Main database coordination
-│   ├── index.rs         # .si4 index file parsing
-│   ├── names.rs         # .sn4 name file parsing
-│   ├── games.rs         # .sg4 game file parsing
-│   └── moves.rs         # Move encoding/decoding
-└── pgn/                 # PGN export functionality
-    ├── mod.rs           # Module exports
-    └── exporter.rs      # PGN file generation
-```
+
+## Development
+
+See implementation plan documents for detailed development roadmap:
+
+- `IMPLEMENTATION_PLAN.md` - Overall project plan
+- `PHASE_1_FOUNDATION.md` - Phase 1 detailed plan
+- `SCID_DATABASE_FORMAT.md` - SCID format specification
+- `PROPOSED_PROJECT_STRUCTURE.md` - Architecture design
+
+## Dependencies
+
+- [shakmaty](https://github.com/niklasf/shakmaty) - Chess move generation and validation
+- [thiserror](https://github.com/dtolnay/thiserror) - Error handling
+- [clap](https://github.com/clap-rs/clap) - CLI argument parsing
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of:
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+- MIT license ([LICENSE-MIT](LICENSE-MIT))
+
+at your option.

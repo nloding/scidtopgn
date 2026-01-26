@@ -59,6 +59,34 @@ Unit tests form the base because they're:
 
 ---
 
+## Test Data Reference
+
+### Location and Datasets
+
+All test data is in `tests/data/`. See `IMPLEMENTATION_PLAN.md` → "Test Data" section for complete documentation.
+
+| Dataset | Files | Purpose in Unit Tests |
+|---------|-------|----------------------|
+| **one** | `one.pgn`, `one.si4/sg4/sn4` | Minimal test cases, fast execution |
+| **five** | `five.pgn`, `five.si4/sg4/sn4` | Comprehensive coverage |
+
+### PGN ↔ SCID Relationship
+
+Each SCID database was created by importing its corresponding PGN file:
+- The PGN files serve as the **expected output** for validation
+- The SCID files are the **input** to parse
+
+### Unit Test Data Strategy
+
+Unit tests should primarily use:
+1. **Synthetic data**: Hand-crafted byte arrays for edge cases
+2. **Minimal real data**: `one.*` dataset for basic sanity checks
+3. **Known values**: Specific games from `five.*` with documented expected values
+
+Integration tests (Phase 9B) use the full datasets for comprehensive validation.
+
+---
+
 ## Reference: Rust Testing Best Practices
 
 ### Cargo Test Framework

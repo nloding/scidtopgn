@@ -21,7 +21,7 @@ shakmaty = "0.26"
 # Binary parsing
 byteorder = "1.5"
 
-# CLI
+# CLI (for cli crate only)
 clap = { version = "4.5", features = ["derive"] }
 
 # Testing

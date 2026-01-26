@@ -952,7 +952,15 @@ impl GameDate {
         self.month >= 1 && self.month <= 12 && self.day >= 1 && self.day <= 31 && self.year < 2048
     }
 
-    /// Format as PGN date string (YYYY.MM.DD)
+    /// Convert to PGN date string format
+    ///
+    /// PGN standard requires unknown components to use "??" or "????":
+    /// - Unknown year: "????.MM.DD"
+    /// - Unknown month: "YYYY.??.DD"
+    /// - Unknown day: "YYYY.MM.??"
+    /// - Fully unknown: "????.??.??"
+    ///
+    /// SCID uses 0 to indicate unknown date components.
     ///
     /// # Examples
     ///
@@ -961,34 +969,33 @@ impl GameDate {
     ///
     /// let date = GameDate::new(2022, 12, 25);
     /// assert_eq!(date.to_pgn_string(), "2022.12.25");
+    ///
+    /// let partial = GameDate { year: 1997, month: 5, day: 0 };
+    /// assert_eq!(partial.to_pgn_string(), "1997.05.??");
+    ///
+    /// let unknown = GameDate { year: 0, month: 0, day: 0 };
+    /// assert_eq!(unknown.to_pgn_string(), "????.??.??");
     /// ```
     pub fn to_pgn_string(&self) -> String {
-        format!("{}.{:02}.{:02}", self.year, self.month, self.day)
-    }
-
-    /// Format with unknown components as "??"
-    ///
-    /// If month or day are 0, they're replaced with "??" in output.
-    pub fn to_pgn_string_with_unknowns(&self) -> String {
-        let year = if self.year == 0 {
+        let year_str = if self.year == 0 {
             "????".to_string()
         } else {
-            self.year.to_string()
+            format!("{:04}", self.year)
         };
 
-        let month = if self.month == 0 {
+        let month_str = if self.month == 0 {
             "??".to_string()
         } else {
             format!("{:02}", self.month)
         };
 
-        let day = if self.day == 0 {
+        let day_str = if self.day == 0 {
             "??".to_string()
         } else {
             format!("{:02}", self.day)
         };
 
-        format!("{}.{}.{}", year, month, day)
+        format!("{}.{}.{}", year_str, month_str, day_str)
     }
 }
 
@@ -1122,11 +1129,17 @@ mod tests {
 
     #[test]
     fn test_game_date_unknown_components() {
-        let date = GameDate { year: 2022, month: 0, day: 15 };
-        assert_eq!(date.to_pgn_string_with_unknowns(), "2022.??.15");
+        // Unknown day
+        let date = GameDate { year: 2022, month: 5, day: 0 };
+        assert_eq!(date.to_pgn_string(), "2022.05.??");
 
-        let date2 = GameDate { year: 0, month: 0, day: 0 };
-        assert_eq!(date2.to_pgn_string_with_unknowns(), "????.??.??");
+        // Unknown month and day
+        let date2 = GameDate { year: 1997, month: 0, day: 0 };
+        assert_eq!(date2.to_pgn_string(), "1997.??.??");
+
+        // Fully unknown
+        let date3 = GameDate { year: 0, month: 0, day: 0 };
+        assert_eq!(date3.to_pgn_string(), "????.??.??");
     }
 
     #[test]
@@ -1191,7 +1204,7 @@ cargo build -p scidtopgn-core
 cargo test -p scidtopgn-core types::tests
 
 # Should see output like:
-# running 12 tests
+# running 10 tests
 # test types::tests::test_game_date_creation ... ok
 # test types::tests::test_game_date_default ... ok
 # test types::tests::test_game_date_pgn_string ... ok
@@ -1322,7 +1335,7 @@ cargo test -p scidtopgn-core prelude_test
 
 **Expected Output**:
 ```
-running 17 tests
+running 16 tests
 test error::tests::test_error_display ... ok
 test error::tests::test_io_error_conversion ... ok
 test error::tests::test_parse_constructor ... ok
@@ -1340,7 +1353,7 @@ test types::tests::test_game_result_to_pgn ... ok
 test types::tests::test_shakmaty_reexports ... ok
 test prelude_test::test_prelude_imports ... ok
 
-test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 ---
@@ -1393,7 +1406,7 @@ test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
    - Error handling with thiserror
    - Core types (GameDate, GameResult)
    - Shakmaty integration for chess types
-   - Comprehensive test suite (17 tests passing)
+   - Comprehensive test suite (16 tests passing)
    - Full documentation
 
    All acceptance criteria met. Ready for Phase 2."
@@ -1404,7 +1417,7 @@ test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 - [ ] Workspace builds successfully
 - [ ] Core library builds successfully
 - [ ] CLI binary builds successfully
-- [ ] All 17+ tests passing
+- [ ] All 16+ tests passing
 - [ ] No clippy warnings
 - [ ] Documentation builds
 - [ ] README exists and is complete
@@ -1424,7 +1437,7 @@ Upon completion of Phase 1, the following must be true:
    - Zero clippy warnings with `-D warnings`
 
 2. **Test Suite**:
-   - All tests pass (minimum 17 tests)
+   - All tests pass (minimum 16 tests)
    - Test coverage > 90% on error and types modules
    - Documentation examples compile and run
 

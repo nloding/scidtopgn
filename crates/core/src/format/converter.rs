@@ -1,1 +1,1 @@
-//! SCID to PGN conversion logic
+// Placeholder - will be implemented in Phase 6

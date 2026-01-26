@@ -58,6 +58,46 @@ PGN is the de facto standard for representing chess games in a human-readable te
 - ✅ Output validates with pgn-extract, scid, chess.com importers
 - ✅ Support multiple output formats (compact, verbose, with/without comments)
 - ✅ Memory-efficient streaming for large databases
+- ✅ **Rating type-aware tag names** (Gap 15: WhiteUSCF, BlackDWZ, etc.)
+
+---
+
+## Test Data Reference
+
+### Location and Datasets
+
+All test data is in `tests/data/`. See `IMPLEMENTATION_PLAN.md` → "Test Data" section for complete documentation.
+
+| Dataset | PGN File | SCID Files | Description |
+|---------|----------|------------|-------------|
+| **one** | `one.pgn` | `one.si4`, `one.sg4`, `one.sn4` | Single game - basic output validation |
+| **five** | `five.pgn` | `five.si4`, `five.sg4`, `five.sn4` | Five games - comprehensive output testing |
+
+### PGN ↔ SCID Relationship
+
+Each SCID database was created by importing its corresponding PGN file. This is the **critical validation relationship** for this phase:
+
+```
+┌─────────────┐     Import      ┌─────────────────────────┐
+│  five.pgn   │  ─────────────► │  five.si4/sg4/sn4       │
+│  (source)   │                 │  (SCID database)        │
+└─────────────┘                 └─────────────────────────┘
+       ▲                                    │
+       │                                    │ Parse + Generate PGN
+       │         Compare                    ▼
+       └──────────────────────────  Generated PGN output
+```
+
+### Validation Strategy
+
+1. Parse SCID database (`five.si4/sg4/sn4`)
+2. Generate PGN output using this phase's formatter
+3. Compare generated PGN against source PGN (`five.pgn`)
+4. Key elements to verify:
+   - Seven Tag Roster values match
+   - Movetext produces identical game sequence
+   - Comments and annotations preserved (if present)
+   - Result tag matches game termination
 
 ---
 
@@ -1169,7 +1209,7 @@ test result: ok. 4 passed
 
 **Common Supplemental Tags**:
 - WhiteElo, BlackElo - Player ratings
-- ECO - Encyclopedia of Chess Openings code
+- ECO - Encyclopedia of Chess Openings code (see Gap 4 below)
 - Opening, Variation - Opening name
 - EventDate - Tournament start date
 - FEN - Non-standard starting position
@@ -1179,12 +1219,34 @@ test result: ok. 4 passed
 - Termination - How game ended (Normal, Time forfeit, etc.)
 - Annotator - Who annotated the game
 
+**ECO Code Handling (Gap 4)**:
+
+SCID stores ECO codes as a 16-bit numeric value using the formula:
+```
+eco_code = letter_index * 100 + number
+```
+
+Where:
+- `letter_index`: 0=A, 1=B, 2=C, 3=D, 4=E
+- `number`: 00-99
+
+Examples:
+- A00 → 0 (but 0 means "no ECO", so A01 → 1)
+- B00 → 100
+- C45 → 245 (Scotch Game)
+- E97 → 497 (King's Indian)
+
+The `eco_to_string()` function is defined in Phase 2 (database module) and reused here
+to ensure consistent ECO code formatting across the codebase. It returns `None` for
+invalid codes (0 or >499).
+
 **Acceptance Criteria**:
 - [ ] Format WhiteElo and BlackElo tags
-- [ ] Format ECO code tag
+- [ ] Format ECO code tag using shared `eco_to_string()` from Phase 2 (Gap 4)
+- [ ] Use `RatingType` for rating tag names (Gap 15: WhiteUSCF, BlackDWZ, etc.)
 - [ ] Format custom tags from game file
 - [ ] Handle FEN and SetUp tags for non-standard starts
-- [ ] Skip tags with zero/empty values
+- [ ] Skip tags with zero/empty values (including eco_code = 0)
 - [ ] Maintain alphabetical ordering (PGN spec recommendation)
 
 **Implementation**:
@@ -1193,12 +1255,55 @@ test result: ok. 4 passed
 
 ```rust
 use std::collections::HashMap;
+use crate::database::{eco_to_string, RatingType};  // Gap 4: ECO, Gap 15: Rating types
+
+/// Get the appropriate PGN tag name for a rating based on its type (Gap 15)
+///
+/// Different rating systems use different tag names in PGN:
+/// - Standard Elo: WhiteElo / BlackElo
+/// - USCF: WhiteUSCF / BlackUSCF
+/// - Rapid: WhiteRapidElo / BlackRapidElo
+/// - ICCF: WhiteICCF / BlackICCF
+/// - DWZ: WhiteDWZ / BlackDWZ
+/// - ECF: WhiteECF / BlackECF
+///
+/// # Arguments
+///
+/// * `color` - "White" or "Black"
+/// * `rating_type` - The rating system type
+///
+/// # Returns
+///
+/// The appropriate PGN tag name (e.g., "WhiteElo", "BlackUSCF")
+fn rating_tag_name(color: &str, rating_type: RatingType) -> &'static str {
+    match (color, rating_type) {
+        ("White", RatingType::None) | ("White", RatingType::Elo) => "WhiteElo",
+        ("White", RatingType::Rapid) => "WhiteRapidElo",
+        ("White", RatingType::Iccf) => "WhiteICCF",
+        ("White", RatingType::Uscf) => "WhiteUSCF",
+        ("White", RatingType::Dwz) => "WhiteDWZ",
+        ("White", RatingType::Ecf) => "WhiteECF",
+        ("White", RatingType::Unknown) => "WhiteElo",
+        ("Black", RatingType::None) | ("Black", RatingType::Elo) => "BlackElo",
+        ("Black", RatingType::Rapid) => "BlackRapidElo",
+        ("Black", RatingType::Iccf) => "BlackICCF",
+        ("Black", RatingType::Uscf) => "BlackUSCF",
+        ("Black", RatingType::Dwz) => "BlackDWZ",
+        ("Black", RatingType::Ecf) => "BlackECF",
+        ("Black", RatingType::Unknown) => "BlackElo",
+        _ => "WhiteElo", // Fallback (shouldn't happen)
+    }
+}
 
 /// Supplemental PGN tags beyond the Seven Tag Roster
 #[derive(Debug, Clone, Default)]
 pub struct SupplementalTags {
     pub white_elo: Option<u16>,
     pub black_elo: Option<u16>,
+    /// Rating type for white (Gap 15: enables proper tag names like WhiteUSCF)
+    pub white_rating_type: RatingType,
+    /// Rating type for black (Gap 15: enables proper tag names like BlackUSCF)
+    pub black_rating_type: RatingType,
     pub eco_code: Option<String>,
     pub opening: Option<String>,
     pub variation: Option<String>,
@@ -1220,18 +1325,20 @@ impl SupplementalTags {
     ) -> Self {
         let mut tags = SupplementalTags::default();
 
-        // ELO ratings (only if non-zero)
-        if index_entry.white_elo > 0 {
+        // Ratings with type information (Gap 15)
+        // Use helper methods to get both value and type
+        if index_entry.has_white_rating() {
             tags.white_elo = Some(index_entry.white_elo);
+            tags.white_rating_type = index_entry.white_rating_type();
         }
-        if index_entry.black_elo > 0 {
+        if index_entry.has_black_rating() {
             tags.black_elo = Some(index_entry.black_elo);
+            tags.black_rating_type = index_entry.black_rating_type();
         }
 
-        // ECO code (only if valid)
-        if index_entry.eco_code > 0 {
-            tags.eco_code = Some(Self::format_eco_code(index_entry.eco_code));
-        }
+        // ECO code using shared eco_to_string() from Phase 2 (Gap 4)
+        // Returns None if eco_code is 0 or invalid
+        tags.eco_code = eco_to_string(index_entry.eco_code);
 
         // FEN for non-standard starts
         if let Some(fen_str) = fen {
@@ -1249,15 +1356,7 @@ impl SupplementalTags {
         tags
     }
 
-    /// Format ECO code from numeric encoding
-    ///
-    /// ECO codes are like: A00, E97, etc.
-    /// Format: Letter (A-E) + Two digits (00-99)
-    fn format_eco_code(code: u16) -> String {
-        let letter = ((code / 100) as u8 + b'A') as char;
-        let number = code % 100;
-        format!("{}{:02}", letter, number)
-    }
+    // NOTE: format_eco_code() removed - use eco_to_string() from database module (Gap 4)
 
     /// Format as PGN tag lines
     ///
@@ -1271,9 +1370,10 @@ impl SupplementalTags {
             tags.push(("Annotator", annotator.clone()));
         }
 
-        // BlackElo
+        // Black rating (Gap 15: use appropriate tag name based on rating type)
         if let Some(elo) = self.black_elo {
-            tags.push(("BlackElo", elo.to_string()));
+            let tag_name = rating_tag_name("Black", self.black_rating_type);
+            tags.push((tag_name, elo.to_string()));
         }
 
         // ECO
@@ -1317,9 +1417,10 @@ impl SupplementalTags {
             tags.push(("Variation", var.clone()));
         }
 
-        // WhiteElo
+        // White rating (Gap 15: use appropriate tag name based on rating type)
         if let Some(elo) = self.white_elo {
-            tags.push(("WhiteElo", elo.to_string()));
+            let tag_name = rating_tag_name("White", self.white_rating_type);
+            tags.push((tag_name, elo.to_string()));
         }
 
         // Custom tags (alphabetically sorted)
@@ -1349,6 +1450,7 @@ mod supplemental_tests {
         let mut tags = SupplementalTags::default();
         tags.white_elo = Some(2850);
         tags.black_elo = Some(2810);
+        // Default rating type is None, which outputs as "WhiteElo"/"BlackElo"
 
         let pgn = tags.to_pgn();
         assert!(pgn.contains("[BlackElo \"2810\"]"));
@@ -1356,11 +1458,64 @@ mod supplemental_tests {
     }
 
     #[test]
+    fn test_rating_types_uscf() {
+        // Gap 15: Test USCF rating type outputs correct tag name
+        let mut tags = SupplementalTags::default();
+        tags.white_elo = Some(2100);
+        tags.white_rating_type = RatingType::Uscf;
+        tags.black_elo = Some(1950);
+        tags.black_rating_type = RatingType::Uscf;
+
+        let pgn = tags.to_pgn();
+        assert!(pgn.contains("[WhiteUSCF \"2100\"]"), "Should use WhiteUSCF tag");
+        assert!(pgn.contains("[BlackUSCF \"1950\"]"), "Should use BlackUSCF tag");
+        assert!(!pgn.contains("WhiteElo"), "Should NOT use WhiteElo");
+    }
+
+    #[test]
+    fn test_rating_types_mixed() {
+        // Gap 15: Test mixed rating types (one player Elo, one USCF)
+        let mut tags = SupplementalTags::default();
+        tags.white_elo = Some(2500);
+        tags.white_rating_type = RatingType::Elo;
+        tags.black_elo = Some(2100);
+        tags.black_rating_type = RatingType::Uscf;
+
+        let pgn = tags.to_pgn();
+        assert!(pgn.contains("[WhiteElo \"2500\"]"));
+        assert!(pgn.contains("[BlackUSCF \"2100\"]"));
+    }
+
+    #[test]
+    fn test_rating_tag_name_function() {
+        // Gap 15: Test the rating_tag_name helper function
+        assert_eq!(rating_tag_name("White", RatingType::Elo), "WhiteElo");
+        assert_eq!(rating_tag_name("Black", RatingType::Elo), "BlackElo");
+        assert_eq!(rating_tag_name("White", RatingType::Uscf), "WhiteUSCF");
+        assert_eq!(rating_tag_name("Black", RatingType::Uscf), "BlackUSCF");
+        assert_eq!(rating_tag_name("White", RatingType::Rapid), "WhiteRapidElo");
+        assert_eq!(rating_tag_name("Black", RatingType::Dwz), "BlackDWZ");
+        assert_eq!(rating_tag_name("White", RatingType::Ecf), "WhiteECF");
+        assert_eq!(rating_tag_name("Black", RatingType::Iccf), "BlackICCF");
+        assert_eq!(rating_tag_name("White", RatingType::None), "WhiteElo"); // Default
+    }
+
+    #[test]
     fn test_eco_code_formatting() {
-        assert_eq!(SupplementalTags::format_eco_code(0), "A00");
-        assert_eq!(SupplementalTags::format_eco_code(99), "A99");
-        assert_eq!(SupplementalTags::format_eco_code(100), "B00");
-        assert_eq!(SupplementalTags::format_eco_code(497), "E97");
+        // Using eco_to_string() from database module (Gap 4)
+        use crate::database::eco_to_string;
+
+        // eco_to_string returns None for 0 (no ECO assigned)
+        assert_eq!(eco_to_string(0), None);
+
+        // Valid ECO codes
+        assert_eq!(eco_to_string(1), Some("A01".to_string()));
+        assert_eq!(eco_to_string(99), Some("A99".to_string()));
+        assert_eq!(eco_to_string(100), Some("B00".to_string()));
+        assert_eq!(eco_to_string(497), Some("E97".to_string()));
+
+        // Invalid (beyond E99)
+        assert_eq!(eco_to_string(500), None);
     }
 
     #[test]
@@ -2096,7 +2251,7 @@ let san = San::from_move(&position, &chess_move).to_string();
 - [x] All format options supported
 
 **Testing**:
-- [ ] All unit tests passing (40+ tests)
+- [ ] All unit tests passing (45+ tests)
 - [ ] Integration tests with real databases passing
 - [ ] PGN validation with external tools (pgn-extract)
 - [ ] Output matches human expectations
@@ -2182,3 +2337,84 @@ for game in reader.games() {
 ---
 
 **Phase 6 delivers the final piece of the conversion pipeline: transforming our parsed, validated chess data into the universal PGN format that humans and software can read and use.** By leveraging shakmaty's SAN generation and following the PGN specification exactly, we produce high-quality, standards-compliant output that works with all major chess software.
+
+---
+
+## Revision History
+
+### Version 2.2 (Current) - Gap 15 Rating Types
+
+This version adds support for rating type-aware PGN tag names (Gap 15).
+
+**Gap Resolutions**:
+
+| Gap | Section | Changes |
+|-----|---------|---------|
+| Gap 15: Rating Types | Task 6.2.2 | Added `white_rating_type` and `black_rating_type` fields to `SupplementalTags` |
+| Gap 15: Rating Types | Task 6.2.2 | Added `rating_tag_name()` helper function for type-aware tag names |
+| Gap 15: Rating Types | Task 6.2.2 | Updated `to_pgn()` to output correct tag names (WhiteUSCF, BlackDWZ, etc.) |
+| Gap 15: Rating Types | Tests | Added 4 new tests for rating type functionality |
+
+**Key Changes**:
+
+1. **Rating type-aware tag names**
+   - `RatingType::Elo` → "WhiteElo" / "BlackElo"
+   - `RatingType::Uscf` → "WhiteUSCF" / "BlackUSCF"
+   - `RatingType::Dwz` → "WhiteDWZ" / "BlackDWZ"
+   - `RatingType::Rapid` → "WhiteRapidElo" / "BlackRapidElo"
+   - etc.
+
+2. **Updated imports**
+   - Added `RatingType` import from `crate::database`
+
+---
+
+### Version 2.1 - Gap 4 ECO Code Conversion
+
+This version incorporates Gap 4 (ECO Code Conversion) to use a shared function across phases.
+
+**Gap Resolutions**:
+
+| Gap | Section | Changes |
+|-----|---------|---------|
+| Gap 4: ECO Code Conversion | Task 6.2.2 | Use `eco_to_string()` from Phase 2 database module instead of local `format_eco_code()` |
+| Gap 4: ECO Code Conversion | Task 6.2.2 | Updated tests to use shared function |
+| Gap 4: ECO Code Conversion | Overview | Added ECO code encoding documentation |
+
+**Key Changes**:
+
+1. **Removed duplicate `format_eco_code()` function**
+   - Previously: `SupplementalTags::format_eco_code()` defined locally
+   - Now: Import and use `eco_to_string()` from `crate::database`
+
+2. **Consistent ECO code handling**
+   - `eco_to_string(0)` returns `None` (no ECO assigned)
+   - `eco_to_string(500+)` returns `None` (invalid code)
+   - Only valid codes (1-499) produce ECO strings
+
+3. **Updated tests**
+   - Tests now use the shared function
+   - Added edge case tests for invalid codes
+
+**Import Change**:
+```rust
+// OLD (local function)
+tags.eco_code = Some(Self::format_eco_code(index_entry.eco_code));
+
+// NEW (shared function from Phase 2)
+use crate::database::eco_to_string;
+tags.eco_code = eco_to_string(index_entry.eco_code);
+```
+
+**Reference**: IMPLEMENTATION_PLAN.md Gap 4, PHASE_2_INDEX_FILE_PARSER.md Task 2.2.5
+
+---
+
+### Version 2.0 (January 2026) - Initial Version
+
+Initial Phase 6 document covering:
+- SAN generation with shakmaty
+- Seven Tag Roster formatting
+- Supplemental tag formatting
+- Movetext formatting
+- Complete PGN document generation

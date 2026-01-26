@@ -1,1 +1,1 @@
-//! ScidReader - main entry point for database access
+// Placeholder - will be implemented in Phase 7

@@ -8,9 +8,12 @@
 //! ```ignore
 //! use scidtopgn_core::prelude::*;
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let reader = ScidReader::open("database.si4")?;
 //! let pgn = reader.to_pgn(PgnOptions::default())?;
 //! println!("{}", pgn);
+//! # Ok(())
+//! # }
 //! ```
 
 // Public modules
@@ -19,10 +22,14 @@ pub mod format;
 pub mod parser;
 
 // Core types and errors
-mod error;
+pub mod error;
 pub mod prelude;
 mod types;
 
 // Re-exports for convenience
 pub use error::{Result, ScidError};
 pub use types::{GameDate, GameResult};
+
+// Main API (will be implemented in later phases)
+// pub use database::reader::ScidReader;
+// pub use format::converter::PgnOptions;

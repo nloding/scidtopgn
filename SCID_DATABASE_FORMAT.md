@@ -976,7 +976,7 @@ sm->promote = promoPieceFromVal[val];
 
 This is because subtracting 7 from a Black pawn's square moves it down-right, not down-left.
 
-**Rook Moves** (verified from SCID source `game.cpp` lines 59162-59177):
+**Rook Moves** (verified from SCID source `game.cpp` lines 59183-59195):
 
 ```cpp
 // From SCID decodeRook():
@@ -1030,7 +1030,7 @@ if (val >= 8) {
 | B6 | 9 | -2 | 27 - 7*(-2) = 41 | ✓ |
 | F2 | 13 | +2 | 27 - 7*2 = 13 | ✓ |
 
-**Queen Moves** (verified from SCID source `game.cpp` lines 59232-59252):
+**Queen Moves** (verified from SCID source `game.cpp` lines 59264-59282):
 
 Queen combines rook-like and bishop-like moves, with a **two-byte encoding for diagonals**:
 

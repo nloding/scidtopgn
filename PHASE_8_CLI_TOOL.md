@@ -522,6 +522,48 @@ OPTIONS:
           - File sizes
           - Player/event/site counts
 
+    --error-mode <MODE>
+        Error handling mode for game parsing failures
+
+        Controls how the tool handles games that fail to parse:
+          - strict:      Stop on first error (default)
+          - lenient:     Skip failed games, continue processing
+          - best-effort: Output partial games when possible
+
+        Examples:
+          --error-mode lenient
+          --error-mode best-effort
+
+    --max-errors <N>
+        Maximum errors before stopping (lenient/best-effort mode)
+
+        After this many errors, stop processing.
+        Use 0 for unlimited. Default: 0
+
+        Example:
+          --error-mode lenient --max-errors 100
+
+    --include-partial
+        Include partially decoded games (best-effort mode)
+
+        When a game fails mid-parse, output moves decoded so far.
+        Adds a comment noting where parsing failed.
+
+    --mmap
+        Force memory-mapped file access
+
+        Can improve performance for large databases by letting
+        the OS handle file caching.
+
+    --mmap-threshold <SIZE>
+        Auto-enable memory mapping above this file size
+
+        Files larger than threshold use memory mapping automatically.
+        Specify with suffix: 50M, 1G, 500K. Default: 100M
+
+        Example:
+          --mmap-threshold 50M
+
     -h, --help
         Print help information
 
@@ -784,6 +826,68 @@ pub struct Args {
     #[arg(conflicts_with = "verbose")]
     pub quiet: bool,
 
+    // === Error Recovery Options (Gap 13) ===
+
+    /// Error handling mode for game parsing failures
+    ///
+    /// Controls how the tool handles games that fail to parse:
+    ///   - strict:     Stop on first error (default)
+    ///   - lenient:    Skip failed games, continue processing
+    ///   - best-effort: Output partial games when possible
+    ///
+    /// Examples:
+    ///   --error-mode lenient     Skip bad games
+    ///   --error-mode best-effort Include partial games
+    #[arg(long)]
+    #[arg(value_name = "MODE")]
+    #[arg(value_parser = ["strict", "lenient", "best-effort"])]
+    #[arg(default_value = "strict")]
+    pub error_mode: String,
+
+    /// Maximum errors before stopping (lenient/best-effort mode only)
+    ///
+    /// After this many errors, stop processing even in lenient mode.
+    /// Use 0 for unlimited errors.
+    ///
+    /// Example:
+    ///   --error-mode lenient --max-errors 100
+    #[arg(long)]
+    #[arg(value_name = "N")]
+    #[arg(default_value = "0")]
+    pub max_errors: usize,
+
+    /// Include partially decoded games in output (best-effort mode)
+    ///
+    /// When a game fails mid-parse, output the moves decoded so far.
+    /// Adds a comment noting where parsing failed.
+    /// Only effective with --error-mode best-effort.
+    #[arg(long)]
+    pub include_partial: bool,
+
+    // === Memory Mapping Options (Gap 14) ===
+
+    /// Force memory-mapped file access for large databases
+    ///
+    /// Memory mapping can improve performance for large databases
+    /// by letting the OS handle file caching efficiently.
+    /// By default, files are read entirely into memory.
+    #[arg(long)]
+    pub mmap: bool,
+
+    /// Auto-enable memory mapping above this file size
+    ///
+    /// Files larger than this threshold automatically use memory mapping.
+    /// Specify size with suffix: 50M, 1G, 500K
+    /// Default: 100M (100 megabytes)
+    ///
+    /// Examples:
+    ///   --mmap-threshold 50M    Enable mmap for files > 50MB
+    ///   --mmap-threshold 1G     Enable mmap for files > 1GB
+    #[arg(long)]
+    #[arg(value_name = "SIZE")]
+    #[arg(default_value = "100M")]
+    pub mmap_threshold: String,
+
     /// Show database information and exit
     ///
     /// Displays database metadata without converting:
@@ -996,6 +1100,11 @@ Options:
   -v, --verbose             Show progress and details
   -q, --quiet               Suppress all non-essential output
       --info                Show database information and exit
+      --error-mode <MODE>   Error handling: strict, lenient, best-effort [default: strict]
+      --max-errors <N>      Stop after N errors (lenient/best-effort) [default: 0]
+      --include-partial     Include partially decoded games (best-effort)
+      --mmap                Force memory-mapped file access
+      --mmap-threshold <SIZE>  Auto-enable mmap above size [default: 100M]
   -h, --help                Print help
   -V, --version             Print version
 
@@ -1006,6 +1115,8 @@ Examples:
   scidtopgn database --range 1-100          First 100 games
   scidtopgn database --player Carlsen       Games with Carlsen
   scidtopgn database --info                 Show database info
+  scidtopgn database --error-mode lenient   Skip failed games
+  scidtopgn large.db --mmap -o output.pgn   Memory-map large database
 
 For more information, visit: https://github.com/yourusername/scidtopgn
 ```
@@ -1054,12 +1165,20 @@ fn main() -> Result<()> {
     args.validate()
         .context("Invalid arguments")?;
 
-    // Open SCID database
+    // Open SCID database with appropriate access mode
     if !args.quiet {
         eprintln!("Opening database: {}", args.input.display());
     }
 
-    let reader = ScidReader::open(&args.input)
+    // Determine file access mode based on flags (Gap 14)
+    let open_options = if args.mmap {
+        OpenOptions::memory_mapped()
+    } else {
+        OpenOptions::auto_detect()
+            .mmap_threshold(parse_size_string(&args.mmap_threshold)?)
+    };
+
+    let reader = ScidReader::open_with_options(&args.input, open_options)
         .with_context(|| format!("Failed to open database: {}", args.input.display()))?;
 
     // Show info and exit if requested
@@ -1125,6 +1244,34 @@ fn show_database_info(reader: &ScidReader) -> Result<()> {
     Ok(())
 }
 
+/// Parse size string like "100M", "1G", "500K" to bytes
+fn parse_size_string(s: &str) -> Result<u64> {
+    let s = s.trim().to_uppercase();
+    let (num_str, multiplier) = if s.ends_with('G') {
+        (&s[..s.len()-1], 1024 * 1024 * 1024)
+    } else if s.ends_with('M') {
+        (&s[..s.len()-1], 1024 * 1024)
+    } else if s.ends_with('K') {
+        (&s[..s.len()-1], 1024)
+    } else {
+        (s.as_str(), 1)
+    };
+
+    let num: u64 = num_str.parse()
+        .with_context(|| format!("Invalid size: {}", s))?;
+
+    Ok(num * multiplier)
+}
+
+/// Parse error mode string to ErrorMode enum
+fn parse_error_mode(s: &str) -> ErrorMode {
+    match s.to_lowercase().as_str() {
+        "lenient" => ErrorMode::Lenient,
+        "best-effort" => ErrorMode::BestEffort,
+        _ => ErrorMode::Strict,
+    }
+}
+
 /// Convert database to PGN
 fn convert_database(
     reader: &ScidReader,
@@ -1157,21 +1304,78 @@ fn convert_database(
         None
     };
 
+    // Configure error handling (Gap 13)
+    let error_mode = parse_error_mode(&args.error_mode);
+    let max_errors = if args.max_errors == 0 { usize::MAX } else { args.max_errors };
+
     // Process games
     let mut processed = 0;
     let mut skipped = 0;
+    let mut errors = 0;
+    let mut partial = 0;
 
     for (idx, game_result) in reader.games().enumerate().skip(start_idx).take(games_to_process) {
-        // Parse game
+        // Parse game with error recovery
         let game = match game_result {
             Ok(g) => g,
             Err(e) => {
-                eprintln!("Warning: Failed to parse game {}: {}", idx + 1, e);
-                skipped += 1;
-                if let Some(ref pb) = progress {
-                    pb.inc(1);
+                errors += 1;
+
+                match error_mode {
+                    ErrorMode::Strict => {
+                        return Err(e).with_context(|| format!("Game {} failed", idx + 1));
+                    }
+                    ErrorMode::Lenient => {
+                        if !args.quiet {
+                            eprintln!("Warning: Skipping game {}: {}", idx + 1, e);
+                        }
+                        skipped += 1;
+                        if errors >= max_errors {
+                            return Err(anyhow::anyhow!(
+                                "Maximum errors ({}) reached, stopping", max_errors
+                            ));
+                        }
+                        if let Some(ref pb) = progress {
+                            pb.inc(1);
+                        }
+                        continue;
+                    }
+                    ErrorMode::BestEffort => {
+                        // Try to get partial game if available
+                        if args.include_partial {
+                            if let Some(partial_game) = e.partial_game() {
+                                if !args.quiet {
+                                    eprintln!("Warning: Partial game {}: {}", idx + 1, e);
+                                }
+                                partial += 1;
+                                // Output partial game with error comment
+                                let pgn = partial_game.to_pgn_with_comment(
+                                    &format!("{{ Parsing stopped: {} }}", e)
+                                );
+                                output.write_all(pgn.as_bytes())
+                                    .context("Failed to write output")?;
+                                if let Some(ref pb) = progress {
+                                    pb.inc(1);
+                                }
+                                continue;
+                            }
+                        }
+                        // No partial available, skip like lenient
+                        if !args.quiet {
+                            eprintln!("Warning: Skipping game {}: {}", idx + 1, e);
+                        }
+                        skipped += 1;
+                        if errors >= max_errors {
+                            return Err(anyhow::anyhow!(
+                                "Maximum errors ({}) reached, stopping", max_errors
+                            ));
+                        }
+                        if let Some(ref pb) = progress {
+                            pb.inc(1);
+                        }
+                        continue;
+                    }
                 }
-                continue;
             }
         };
 
@@ -1195,22 +1399,42 @@ fn convert_database(
 
         if let Some(ref pb) = progress {
             pb.inc(1);
-            pb.set_message(format!("Converted: {} | Skipped: {}", processed, skipped));
+            pb.set_message(format!("OK: {} | Skip: {} | Err: {}", processed, skipped, errors));
         }
     }
 
     if let Some(pb) = progress {
-        pb.finish_with_message(format!("Complete! Converted: {} | Skipped: {}", processed, skipped));
+        pb.finish_with_message(format!(
+            "Complete! Converted: {} | Skipped: {} | Errors: {} | Partial: {}",
+            processed, skipped, errors, partial
+        ));
     }
 
     if !args.quiet {
+        eprintln!("Processed: {} games", processed);
         if skipped > 0 {
-            eprintln!("Processed: {} games", processed);
-            eprintln!("Skipped:   {} games", skipped);
+            eprintln!("Skipped:   {} games (filtered)", skipped);
+        }
+        if errors > 0 {
+            eprintln!("Errors:    {} games", errors);
+        }
+        if partial > 0 {
+            eprintln!("Partial:   {} games", partial);
         }
     }
 
     Ok(())
+}
+
+/// Error handling mode (Gap 13)
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ErrorMode {
+    /// Stop on first error
+    Strict,
+    /// Skip failed games, continue processing
+    Lenient,
+    /// Output partial games when possible
+    BestEffort,
 }
 ```
 
@@ -1415,6 +1639,16 @@ cargo test --test integration
 ./target/release/scidtopgn nonexistent
 ./target/release/scidtopgn test/data/five --range 0
 ./target/release/scidtopgn test/data/five --range 10-5
+
+# Test error recovery modes (Gap 13)
+./target/release/scidtopgn test/data/five --error-mode strict
+./target/release/scidtopgn test/data/five --error-mode lenient
+./target/release/scidtopgn test/data/five --error-mode best-effort --include-partial
+./target/release/scidtopgn test/data/five --error-mode lenient --max-errors 10
+
+# Test memory mapping (Gap 14)
+./target/release/scidtopgn large-database --mmap -o output.pgn
+./target/release/scidtopgn large-database --mmap-threshold 50M -o output.pgn
 ```
 
 **Expected Output Examples**:
@@ -1446,6 +1680,27 @@ Caused by:
       ✗ nonexistent.si4 (index file)
       ✗ nonexistent.sn4 (name file)
       ✗ nonexistent.sg4 (game file)
+
+$ scidtopgn corrupted-database --error-mode lenient -o output.pgn
+Opening database: corrupted-database
+Database: Partially Corrupted DB
+Total games: 1000
+Writing to: output.pgn
+Warning: Skipping game 45: Invalid move byte 0xFF at position 23
+Warning: Skipping game 178: Unexpected end of move data
+Warning: Skipping game 512: Invalid piece number 16
+Processed: 997 games
+Skipped:   0 games (filtered)
+Errors:    3 games
+
+$ scidtopgn large-database --mmap --verbose -o output.pgn
+Opening database: large-database
+Database: Mega Database 2024
+Total games: 500000
+Using memory-mapped file access
+Writing to: output.pgn
+[00:05:32] ████████████████████ 500000/500000 OK: 499850 | Skip: 0 | Err: 150
+Complete! Converted: 499850 | Skipped: 0 | Errors: 150 | Partial: 0
 ```
 
 ---
@@ -1471,3 +1726,72 @@ Caused by:
 ---
 
 **Phase 8 delivers a professional command-line tool that makes our SCID parser accessible to all users.** By following CLI best practices and focusing on user experience, we create a tool that's not just functional, but actually pleasant to use.
+
+---
+
+## Revision History
+
+### Version 1.1 (January 2026) - Error Recovery and Memory Mapping
+
+This version adds CLI support for error recovery (Gap 13) and memory mapping (Gap 14).
+
+**New CLI Flags (Gap 13 - Error Recovery)**:
+
+| Flag | Description |
+|------|-------------|
+| `--error-mode <MODE>` | Error handling: `strict`, `lenient`, `best-effort` (default: strict) |
+| `--max-errors <N>` | Stop after N errors in lenient/best-effort mode (default: 0 = unlimited) |
+| `--include-partial` | Output partially decoded games (best-effort mode) |
+
+**Error Modes Explained**:
+- **strict**: Stop on first error (traditional behavior)
+- **lenient**: Skip failed games, continue processing others
+- **best-effort**: Output partial games when possible, with error comments
+
+**New CLI Flags (Gap 14 - Memory Mapping)**:
+
+| Flag | Description |
+|------|-------------|
+| `--mmap` | Force memory-mapped file access |
+| `--mmap-threshold <SIZE>` | Auto-enable mmap above size (default: 100M) |
+
+**Size Format**: Supports suffixes K, M, G (e.g., `50M`, `1G`, `500K`)
+
+**Changes Summary**:
+
+| Section | Change |
+|---------|--------|
+| Task 8.1.2 | Added error recovery and memory mapping to argument design |
+| Task 8.2.2 | Added new flags to Args struct |
+| Task 8.3.1 | Updated main() with OpenOptions for memory mapping |
+| Task 8.3.1 | Rewrote convert_database() with error mode handling |
+| Validation | Added test commands for new flags |
+
+**Example Usage**:
+
+```bash
+# Process large database with memory mapping and lenient error handling
+scidtopgn mega-database.db \
+    --mmap \
+    --error-mode lenient \
+    --max-errors 100 \
+    -o output.pgn
+
+# Get partial games from corrupted database
+scidtopgn corrupted.db \
+    --error-mode best-effort \
+    --include-partial \
+    -o recovered.pgn
+```
+
+**Reference**: IMPLEMENTATION_PLAN.md Phases 7.3 and 7.4, IMPLEMENTATION_GAPS.md Gaps 13 and 14
+
+---
+
+### Version 1.0 (Initial)
+
+- Original Phase 8 implementation plan
+- Core CLI structure with clap
+- Basic conversion workflow
+- Progress indicators
+- Filtering options

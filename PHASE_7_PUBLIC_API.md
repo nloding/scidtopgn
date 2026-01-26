@@ -63,6 +63,43 @@ Phase 7 (Public API)     → Wraps everything in ScidReader
 4. **Prelude** - Convenient re-exports for ergonomic imports
 5. **Documentation** - Comprehensive rustdoc comments and examples
 
+**Streaming Architecture (Gap 8 - CRITICAL)**:
+
+The library uses a **streaming-first architecture** for game data:
+
+```text
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   .si4      │     │   .sn4      │     │   .sg4      │
+│  (Index)    │     │  (Names)    │     │  (Games)    │
+└─────────────┘     └─────────────┘     └─────────────┘
+       │                   │                   │
+       ▼                   ▼                   ▼
+  Load into           Load into          STREAM on
+   memory              memory             demand
+       │                   │                   │
+       └───────────────────┴───────────────────┘
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │ ScidReader  │
+                    │  - header   │
+                    │  - entries  │ ← In-memory (small)
+                    │  - names    │
+                    │  - sg4_file │ ← File handle (streaming)
+                    └─────────────┘
+```
+
+**Why Streaming for Game Data?**
+
+1. **Memory Efficiency**: A database with 1 million games has ~1GB of move data.
+   Loading everything into memory is impractical.
+2. **Constant Memory**: Streaming uses O(1) memory regardless of database size.
+3. **Fast Startup**: No need to read entire SG4 file on open.
+4. **Random Access**: Index provides offsets for direct seeking to any game.
+
+This is the **DEFAULT and PRIMARY** mode of operation. The library is designed
+around streaming game data from disk, not loading it all into memory.
+
 **Design Principles**:
 
 1. **Minimal Surface Area**: Expose only what users need
@@ -81,6 +118,7 @@ Phase 7 (Public API)     → Wraps everything in ScidReader
 - ✅ Clear error messages for all failure modes
 - ✅ Comprehensive documentation with examples
 - ✅ Pass Rust API guidelines checklist
+- ✅ **Export rating and material types** (Gap 15, Gap 16: RatingType, MaterialSignature)
 
 ---
 
@@ -522,11 +560,25 @@ use crate::database::names::{NameDatabase, parse_name_database};
 /// - `.sn4` - Name file (player names, event names, etc.)
 /// - `.sg4` - Game file (chess moves and annotations)
 ///
-/// # Memory Usage
+/// # Memory Usage (Gap 8 - Streaming Architecture)
 ///
-/// `ScidReader` loads the index and names into memory on open for fast
-/// access. For a database with 100,000 games, expect ~50MB RAM usage.
-/// Game data is read on-demand from the .sg4 file.
+/// `ScidReader` uses a **streaming-first architecture**:
+///
+/// **Loaded into memory on open**:
+/// - Index entries (.si4): ~47 bytes per game
+/// - Name database (.sn4): Varies, typically 1-10MB
+///
+/// **Streamed from disk on demand**:
+/// - Game data (.sg4): Read per-game when `game()` is called
+///
+/// For a database with 100,000 games:
+/// - Index: ~4.7MB (100,000 × 47 bytes)
+/// - Names: ~5MB typical
+/// - Games: 0 bytes at open (streamed on demand)
+/// - **Total at open: ~10MB** regardless of game data size
+///
+/// This allows the library to handle databases of any size with constant
+/// memory overhead at startup.
 ///
 /// # Examples
 ///
@@ -1618,6 +1670,117 @@ fn test_write_pgn_to_buffer() {
 
 ---
 
+#### Task 7.4.3: Streaming Game Data Access (Gap 8)
+
+**Objective**: Document and ensure that game data is streamed from disk by default.
+
+**Why Streaming is Essential**:
+
+SCID databases can contain millions of games. The game data file (.sg4) can be gigabytes in size. Loading this into memory would be:
+- Impractical for large databases
+- Wasteful when only accessing a subset of games
+- Slow at startup
+
+**The Streaming Model**:
+
+```rust
+impl ScidReader {
+    /// Access a game by streaming from disk
+    ///
+    /// This method:
+    /// 1. Looks up the game's offset from the in-memory index
+    /// 2. Seeks to that offset in the .sg4 file
+    /// 3. Reads only the bytes for that specific game
+    /// 4. Parses and returns the game
+    ///
+    /// Memory used: O(1) - only the single game being processed
+    pub fn game(&self, index: usize) -> Result<Game> {
+        // Get offset from index (already in memory)
+        let entry = &self.index_entries[index];
+
+        // Clone file handle for thread-safe access
+        let mut file = self.sg4_file.try_clone()?;
+
+        // Seek directly to game data (streaming read)
+        file.seek(SeekFrom::Start(entry.game_offset as u64))?;
+
+        // Read only the bytes for this game
+        let mut game_bytes = vec![0u8; entry.game_length as usize];
+        file.read_exact(&mut game_bytes)?;
+
+        // Parse and return
+        parse_and_build_game(entry, &game_bytes, &self.names)
+    }
+}
+```
+
+**Streaming Iterator**:
+
+The `games()` iterator is also streaming - it processes one game at a time:
+
+```rust
+// This uses O(1) memory regardless of database size
+for game in reader.games() {
+    let game = game?;
+    process_game(&game);
+    // `game` is dropped here, memory freed before next iteration
+}
+
+// Compare to collecting all games (AVOID for large databases):
+let all_games: Vec<Game> = reader.games().collect(); // O(n) memory!
+```
+
+**Streaming PGN Output**:
+
+The `write_pgn()` method streams output without buffering all games:
+
+```rust
+// Streaming output - constant memory
+let file = File::create("output.pgn")?;
+reader.write_pgn(file, &options)?;  // ✅ Streams one game at a time
+
+// In-memory output - allocates full string
+let pgn = reader.to_pgn(&options)?;  // ❌ Allocates entire output
+std::fs::write("output.pgn", pgn)?;
+```
+
+**Performance Characteristics**:
+
+| Operation | Memory | Time Complexity |
+|-----------|--------|-----------------|
+| `open()` | O(n) index entries | O(n) read index |
+| `game(i)` | O(1) per game | O(1) seek + read |
+| `games()` iteration | O(1) per game | O(n) total |
+| `write_pgn()` | O(1) per game | O(n) total |
+| `to_pgn()` | O(n) output string | O(n) total |
+
+**Best Practices**:
+
+```rust
+// ✅ GOOD: Stream processing
+for game in reader.games() {
+    writer.write_all(game?.to_pgn()?.as_bytes())?;
+}
+
+// ✅ GOOD: Use write_pgn for file output
+reader.write_pgn(File::create("out.pgn")?, &options)?;
+
+// ❌ AVOID: Collecting all games into memory
+let games: Vec<_> = reader.games().collect::<Result<_, _>>()?;
+
+// ❌ AVOID: Building entire PGN string for large databases
+let huge_string = reader.to_pgn(&options)?;  // May use gigabytes!
+```
+
+**Acceptance Criteria**:
+- [ ] Game data is read from disk on demand (not loaded at open)
+- [ ] `game()` method seeks and reads only requested game
+- [ ] `games()` iterator processes one game at a time
+- [ ] `write_pgn()` streams output without buffering all games
+- [ ] Documentation emphasizes streaming as default/preferred
+
+---
+
 ### Section 7.5: Prelude Module
 
 **Objective**: Create convenient re-exports for library users.
@@ -1653,6 +1816,29 @@ pub use crate::format::pgn::PgnOptions;
 // Re-export common data types
 pub use crate::types::{GameDate, GameResult};
 
+// Re-export rating and material types (Gap 15, Gap 16)
+pub use crate::database::{
+    RatingType,
+    MaterialSignature,
+    parse_rating,
+    MATSIG_STANDARD_START,
+    MATSIG_EMPTY,
+};
+
+// Re-export error recovery types (Gap 13)
+pub use crate::reader::{
+    ErrorMode,
+    GameProcessResult,
+    ConversionOptions,
+    ConversionStats,
+};
+
+// Re-export file access types (Gap 14)
+pub use crate::reader::{
+    FileAccessMode,
+    OpenOptions,
+};
+
 // Re-export commonly used shakmaty types for convenience
 pub use shakmaty::{Color, Role, Square, Move as ChessMove};
 ```
@@ -1675,6 +1861,21 @@ pub use game::Game;
 // ScidReader is the main entry point
 mod reader;
 pub use reader::ScidReader;
+
+// Re-export error recovery types (Gap 13)
+pub use reader::{ErrorMode, GameProcessResult, ConversionOptions, ConversionStats};
+
+// Re-export file access types (Gap 14)
+pub use reader::{FileAccessMode, OpenOptions};
+
+// Re-export rating and material types (Gap 15, Gap 16)
+pub use database::{
+    RatingType,
+    MaterialSignature,
+    parse_rating,
+    MATSIG_STANDARD_START,
+    MATSIG_EMPTY,
+};
 ```
 
 **Testing Usage**:
@@ -1689,6 +1890,751 @@ fn test_prelude_import() {
     let options = PgnOptions::default();
     let _pgn = game.to_pgn_with_options(&options).unwrap();
 }
+
+#[test]
+fn test_rating_type_export() {
+    // Gap 15: Test that RatingType is accessible from prelude
+    use scidtopgn_core::prelude::*;
+
+    let rating_type = RatingType::Elo;
+    assert_eq!(rating_type.to_pgn_suffix(), Some("Elo"));
+
+    let (rtype, value) = parse_rating(0x1944); // Type 1, value 2372
+    assert_eq!(rtype, RatingType::Elo);
+    assert_eq!(value, 2372);
+}
+
+#[test]
+fn test_material_signature_export() {
+    // Gap 16: Test that MaterialSignature is accessible from prelude
+    use scidtopgn_core::prelude::*;
+
+    let sig = MaterialSignature::from_raw(MATSIG_STANDARD_START);
+    assert!(sig.is_standard_start());
+    assert_eq!(sig.white_queens(), 1);
+    assert_eq!(sig.white_pawns(), 8);
+
+    let empty = MaterialSignature::from_raw(MATSIG_EMPTY);
+    assert!(empty.is_empty());
+}
+```
+
+---
+
+### Section 7.6: Error Recovery Strategy
+
+**Objective**: Provide configurable error handling for robust database processing.
+
+When processing large databases, strict error handling (fail on first error) may not be appropriate. Users may want to continue processing remaining games even if some are corrupted. This section defines the error recovery API.
+
+---
+
+#### Task 7.6.1: Error Types and Recoverability
+
+**Objective**: Extend error types to indicate which errors are recoverable.
+
+**Implementation**:
+
+**File**: `crates/core/src/error.rs` (extensions)
+
+```rust
+/// Errors specific to game processing (potentially recoverable)
+#[derive(Debug, thiserror::Error)]
+pub enum GameProcessError {
+    #[error("Failed to read game data at offset {offset}: {source}")]
+    ReadError {
+        offset: u64,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("Failed to decode move {move_num} (byte 0x{byte:02X}): {message}")]
+    MoveDecodeError {
+        move_num: usize,
+        byte: u8,
+        message: String,
+    },
+
+    #[error("Invalid game structure: {message}")]
+    StructureError { message: String },
+}
+
+impl ScidError {
+    /// Returns true if this error is recoverable (can skip and continue)
+    ///
+    /// Recoverable errors typically affect a single game and don't
+    /// compromise the ability to read other games.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn_core::ScidError;
+    ///
+    /// let error = ScidError::MoveDecodeError { move_num: 5, byte: 0xFF, message: "unknown".into() };
+    /// assert!(error.is_recoverable());
+    ///
+    /// let error = ScidError::FileNotFound { file: "db.si4".into() };
+    /// assert!(!error.is_recoverable());
+    /// ```
+    pub fn is_recoverable(&self) -> bool {
+        matches!(
+            self,
+            ScidError::GameProcessError { .. }
+                | ScidError::MoveDecodeError { .. }
+                | ScidError::InvalidGameData { .. }
+        )
+    }
+}
+```
+
+---
+
+#### Task 7.6.2: Error Mode Configuration
+
+**Objective**: Allow users to configure error handling behavior.
+
+**Implementation**:
+
+**File**: `crates/core/src/reader.rs` (new types)
+
+```rust
+/// How to handle errors during database processing
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ErrorMode {
+    /// Stop immediately on first error (default)
+    #[default]
+    Strict,
+
+    /// Log errors and continue, fail if error count exceeds max_errors
+    Lenient {
+        /// Maximum errors before aborting (0 = unlimited)
+        max_errors: usize,
+    },
+
+    /// Continue processing regardless of errors, collect partial results
+    BestEffort,
+}
+
+/// Result of processing a single game with error recovery
+#[derive(Debug, Clone)]
+pub enum GameProcessResult {
+    /// Game processed successfully
+    Success(Game),
+
+    /// Game partially processed (e.g., moves truncated at error point)
+    Partial {
+        game: Game,
+        error: String,
+        moves_decoded: usize,
+    },
+
+    /// Game processing failed entirely
+    Failed {
+        game_index: usize,
+        error: ScidError,
+    },
+}
+
+impl GameProcessResult {
+    /// Returns the game if successfully or partially processed
+    pub fn game(&self) -> Option<&Game> {
+        match self {
+            GameProcessResult::Success(g) => Some(g),
+            GameProcessResult::Partial { game, .. } => Some(game),
+            GameProcessResult::Failed { .. } => None,
+        }
+    }
+
+    /// Returns true if game was fully successful
+    pub fn is_success(&self) -> bool {
+        matches!(self, GameProcessResult::Success(_))
+    }
+
+    /// Returns true if game has any data (success or partial)
+    pub fn has_game(&self) -> bool {
+        !matches!(self, GameProcessResult::Failed { .. })
+    }
+}
+
+/// Options for database conversion operations
+#[derive(Debug, Clone)]
+pub struct ConversionOptions {
+    /// PGN formatting options
+    pub pgn: PgnOptions,
+
+    /// Error handling mode
+    pub error_mode: ErrorMode,
+
+    /// Include partial games in output
+    pub include_partial: bool,
+}
+
+impl Default for ConversionOptions {
+    fn default() -> Self {
+        ConversionOptions {
+            pgn: PgnOptions::default(),
+            error_mode: ErrorMode::Strict,
+            include_partial: false,
+        }
+    }
+}
+
+/// Statistics from a conversion operation
+#[derive(Debug, Clone, Default)]
+pub struct ConversionStats {
+    /// Total games in database
+    pub total_games: usize,
+
+    /// Successfully converted games
+    pub successful: usize,
+
+    /// Partially converted games (if include_partial enabled)
+    pub partial: usize,
+
+    /// Failed games
+    pub failed: usize,
+
+    /// List of errors encountered
+    pub errors: Vec<(usize, ScidError)>,
+}
+
+impl ConversionStats {
+    /// Returns true if all games were successfully processed
+    pub fn is_complete(&self) -> bool {
+        self.failed == 0 && self.partial == 0
+    }
+
+    /// Returns percentage of successful conversions
+    pub fn success_rate(&self) -> f64 {
+        if self.total_games == 0 {
+            100.0
+        } else {
+            (self.successful as f64 / self.total_games as f64) * 100.0
+        }
+    }
+}
+```
+
+---
+
+#### Task 7.6.3: ScidReader Methods with Error Recovery
+
+**Objective**: Add methods that support configurable error handling.
+
+**Implementation**:
+
+**File**: `crates/core/src/reader.rs` (ScidReader impl continued)
+
+```rust
+impl ScidReader {
+    /// Processes a game with error recovery, returning result status
+    ///
+    /// Unlike `game()`, this method returns a `GameProcessResult` that
+    /// indicates success, partial success, or failure - allowing callers
+    /// to decide how to handle each case.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn_core::{ScidReader, GameProcessResult};
+    ///
+    /// let reader = ScidReader::open("database")?;
+    /// match reader.process_game(0) {
+    ///     GameProcessResult::Success(game) => {
+    ///         println!("Full game: {} moves", game.move_count());
+    ///     }
+    ///     GameProcessResult::Partial { game, error, moves_decoded } => {
+    ///         println!("Partial: {} moves before error: {}", moves_decoded, error);
+    ///     }
+    ///     GameProcessResult::Failed { game_index, error } => {
+    ///         println!("Failed to process game {}: {}", game_index, error);
+    ///     }
+    /// }
+    /// # Ok::<(), scidtopgn_core::ScidError>(())
+    /// ```
+    pub fn process_game(&self, index: usize) -> GameProcessResult {
+        match self.game(index) {
+            Ok(game) => GameProcessResult::Success(game),
+            Err(e) if e.is_recoverable() => {
+                // Try partial recovery
+                match self.try_partial_game(index) {
+                    Some((game, moves)) => GameProcessResult::Partial {
+                        game,
+                        error: e.to_string(),
+                        moves_decoded: moves,
+                    },
+                    None => GameProcessResult::Failed {
+                        game_index: index,
+                        error: e,
+                    },
+                }
+            }
+            Err(e) => GameProcessResult::Failed {
+                game_index: index,
+                error: e,
+            },
+        }
+    }
+
+    /// Attempts to get a partial game (metadata + whatever moves decoded)
+    fn try_partial_game(&self, index: usize) -> Option<(Game, usize)> {
+        // Implementation: read game header/tags without full move decoding
+        // Return None if even header parsing fails
+        // This is a best-effort recovery
+        None // Placeholder - implement based on error recovery needs
+    }
+
+    /// Converts database with configurable error handling
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn_core::{ScidReader, ConversionOptions, ErrorMode};
+    /// use std::fs::File;
+    ///
+    /// let reader = ScidReader::open("database")?;
+    /// let file = File::create("output.pgn")?;
+    ///
+    /// let options = ConversionOptions {
+    ///     error_mode: ErrorMode::Lenient { max_errors: 10 },
+    ///     include_partial: true,
+    ///     ..Default::default()
+    /// };
+    ///
+    /// let stats = reader.write_pgn_with_recovery(file, &options)?;
+    /// println!("Converted {}/{} games", stats.successful, stats.total_games);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn write_pgn_with_recovery(
+        &self,
+        mut writer: impl std::io::Write,
+        options: &ConversionOptions,
+    ) -> Result<ConversionStats> {
+        let mut stats = ConversionStats {
+            total_games: self.game_count(),
+            ..Default::default()
+        };
+
+        for index in 0..self.game_count() {
+            let result = self.process_game(index);
+
+            match &result {
+                GameProcessResult::Success(game) => {
+                    let pgn = game.to_pgn_with_options(&options.pgn)?;
+                    writer.write_all(pgn.as_bytes())?;
+                    stats.successful += 1;
+                }
+                GameProcessResult::Partial { game, error, .. } => {
+                    if options.include_partial {
+                        let pgn = game.to_pgn_with_options(&options.pgn)?;
+                        writer.write_all(pgn.as_bytes())?;
+                        stats.partial += 1;
+                    } else {
+                        stats.failed += 1;
+                    }
+                    stats.errors.push((index, ScidError::GameProcessError {
+                        message: error.clone(),
+                    }));
+                }
+                GameProcessResult::Failed { error, .. } => {
+                    stats.failed += 1;
+                    stats.errors.push((index, error.clone()));
+
+                    // Check error limits
+                    if let ErrorMode::Strict = options.error_mode {
+                        return Err(error.clone());
+                    }
+                    if let ErrorMode::Lenient { max_errors } = options.error_mode {
+                        if max_errors > 0 && stats.errors.len() >= max_errors {
+                            return Err(ScidError::TooManyErrors {
+                                count: stats.errors.len(),
+                                max: max_errors,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(stats)
+    }
+}
+```
+
+---
+
+### Section 7.7: Memory Mapping for Large Databases
+
+**Objective**: Support memory-mapped file access for better performance with large databases.
+
+Memory mapping allows the operating system to manage file caching efficiently, which can significantly improve performance for large databases that don't fit in RAM.
+
+---
+
+#### Task 7.7.1: File Access Mode Configuration
+
+**Objective**: Define options for controlling how files are accessed.
+
+**Implementation**:
+
+**File**: `crates/core/src/reader.rs` (new types)
+
+```rust
+/// How to access the game data file (.sg4)
+///
+/// # Gap 8: Streaming is the Default
+///
+/// The library uses streaming by default because:
+/// - Game data files can be very large (gigabytes for million-game databases)
+/// - Index entries provide direct offsets for random access
+/// - Memory usage stays constant regardless of database size
+/// - No startup delay from loading entire file
+///
+/// **IMPORTANT**: This only affects the .sg4 game file. The index (.si4) and
+/// names (.sn4) are always loaded into memory for fast lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FileAccessMode {
+    /// Stream game data from file on demand (DEFAULT - Gap 8)
+    ///
+    /// Each game is read from disk when requested. This provides:
+    /// - O(1) memory usage regardless of database size
+    /// - Fast database open (no need to read all game data)
+    /// - Efficient random access via index offsets
+    ///
+    /// This is the recommended mode for most use cases.
+    #[default]
+    Streaming,
+
+    /// Memory-map files for OS-managed caching
+    ///
+    /// Uses mmap to let the OS manage file caching. Benefits:
+    /// - Better performance for repeated random access
+    /// - OS handles memory pressure automatically
+    /// - Good for databases that fit in available RAM
+    ///
+    /// Requires the `mmap` feature to be enabled.
+    MemoryMapped,
+
+    /// Load entire game file into memory (NOT RECOMMENDED)
+    ///
+    /// Loads all game data into RAM on open. Only use for:
+    /// - Very small databases (< 1000 games)
+    /// - When you need to process all games multiple times
+    /// - Benchmarking/testing scenarios
+    ///
+    /// **WARNING**: Will use significant memory for large databases!
+    InMemory,
+}
+
+/// Options for opening a SCID database
+#[derive(Debug, Clone)]
+pub struct OpenOptions {
+    /// How to access the game file (.sg4)
+    pub file_access: FileAccessMode,
+
+    /// Threshold in bytes above which to auto-enable memory mapping
+    /// (only applies if file_access is InMemory)
+    /// Default: 100MB
+    pub mmap_threshold: Option<u64>,
+
+    /// Pre-validate entire database on open
+    pub validate_on_open: bool,
+}
+
+impl Default for OpenOptions {
+    fn default() -> Self {
+        OpenOptions {
+            // Gap 8: Streaming is the default mode
+            file_access: FileAccessMode::Streaming,
+            // Auto-upgrade to mmap for very large files (optional optimization)
+            mmap_threshold: Some(500 * 1024 * 1024), // 500MB
+            validate_on_open: false,
+        }
+    }
+}
+
+impl OpenOptions {
+    /// Create options for memory-mapped access
+    pub fn memory_mapped() -> Self {
+        OpenOptions {
+            file_access: FileAccessMode::MemoryMapped,
+            mmap_threshold: None,
+            validate_on_open: false,
+        }
+    }
+
+    /// Create options for streaming access
+    pub fn streaming() -> Self {
+        OpenOptions {
+            file_access: FileAccessMode::Streaming,
+            mmap_threshold: None,
+            validate_on_open: false,
+        }
+    }
+
+    /// Set the mmap threshold (auto-enable mmap for files larger than this)
+    pub fn with_mmap_threshold(mut self, bytes: u64) -> Self {
+        self.mmap_threshold = Some(bytes);
+        self
+    }
+
+    /// Disable auto mmap threshold
+    pub fn without_auto_mmap(mut self) -> Self {
+        self.mmap_threshold = None;
+        self
+    }
+
+    /// Enable validation on open
+    pub fn with_validation(mut self) -> Self {
+        self.validate_on_open = true;
+        self
+    }
+}
+```
+
+---
+
+#### Task 7.7.2: ScidReader with Configurable File Access
+
+**Objective**: Add open methods that support different file access modes.
+
+**Implementation**:
+
+**File**: `crates/core/src/reader.rs` (ScidReader impl continued)
+
+```rust
+/// Internal representation of game file access
+enum GameFileAccess {
+    /// Standard file handle
+    File(std::fs::File),
+
+    /// Memory-mapped file (using memmap2 crate)
+    #[cfg(feature = "mmap")]
+    MemoryMapped(memmap2::Mmap),
+}
+
+impl ScidReader {
+    /// Opens a SCID database with custom options.
+    ///
+    /// This method allows fine-grained control over how the database
+    /// files are accessed, which can improve performance for specific
+    /// use cases.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Base path to database files (without extension)
+    /// * `options` - Configuration for file access and behavior
+    ///
+    /// # Examples
+    ///
+    /// Open with memory mapping for a large database:
+    /// ```
+    /// use scidtopgn_core::{ScidReader, OpenOptions};
+    ///
+    /// let options = OpenOptions::memory_mapped();
+    /// let reader = ScidReader::open_with_options("large_database", options)?;
+    /// # Ok::<(), scidtopgn_core::ScidError>(())
+    /// ```
+    ///
+    /// Open with auto mmap threshold:
+    /// ```
+    /// use scidtopgn_core::{ScidReader, OpenOptions};
+    ///
+    /// let options = OpenOptions::default()
+    ///     .with_mmap_threshold(50 * 1024 * 1024); // 50MB
+    /// let reader = ScidReader::open_with_options("database", options)?;
+    /// # Ok::<(), scidtopgn_core::ScidError>(())
+    /// ```
+    pub fn open_with_options(path: impl AsRef<Path>, options: OpenOptions) -> Result<Self> {
+        let base_path = path.as_ref().to_path_buf();
+        let sg4_path = base_path.with_extension("sg4");
+
+        // Check if we should use mmap based on file size
+        let file_access = if options.file_access == FileAccessMode::InMemory {
+            if let Some(threshold) = options.mmap_threshold {
+                let metadata = std::fs::metadata(&sg4_path)?;
+                if metadata.len() > threshold {
+                    FileAccessMode::MemoryMapped
+                } else {
+                    FileAccessMode::InMemory
+                }
+            } else {
+                FileAccessMode::InMemory
+            }
+        } else {
+            options.file_access
+        };
+
+        // Open with determined access mode
+        match file_access {
+            FileAccessMode::InMemory | FileAccessMode::Streaming => {
+                Self::open(path)
+            }
+            FileAccessMode::MemoryMapped => {
+                Self::open_mmap(path)
+            }
+        }
+    }
+
+    /// Opens a SCID database with memory-mapped file access.
+    ///
+    /// Memory mapping allows the operating system to manage caching of
+    /// the game file, which can improve performance for large databases
+    /// by reducing I/O overhead and leveraging the OS page cache.
+    ///
+    /// # Requirements
+    ///
+    /// This method requires the `mmap` feature to be enabled:
+    /// ```toml
+    /// [dependencies]
+    /// scidtopgn-core = { version = "0.1", features = ["mmap"] }
+    /// ```
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use scidtopgn_core::ScidReader;
+    ///
+    /// // Best for databases > 100MB
+    /// let reader = ScidReader::open_mmap("large_database")?;
+    /// println!("Loaded {} games", reader.game_count());
+    /// # Ok::<(), scidtopgn_core::ScidError>(())
+    /// ```
+    ///
+    /// # Platform Notes
+    ///
+    /// - On Linux/macOS, memory mapping uses mmap() system call
+    /// - On Windows, uses CreateFileMapping/MapViewOfFile
+    /// - Performance benefit is greatest for random access patterns
+    /// - For purely sequential access, standard file I/O may be faster
+    #[cfg(feature = "mmap")]
+    pub fn open_mmap(path: impl AsRef<Path>) -> Result<Self> {
+        use memmap2::Mmap;
+
+        let base_path = path.as_ref().to_path_buf();
+
+        // Parse index and names normally
+        let si4_path = base_path.with_extension("si4");
+        let sn4_path = base_path.with_extension("sn4");
+        let sg4_path = base_path.with_extension("sg4");
+
+        // Validate files exist
+        if !si4_path.exists() {
+            return Err(ScidError::FileNotFound {
+                file: si4_path.display().to_string(),
+            });
+        }
+        if !sn4_path.exists() {
+            return Err(ScidError::FileNotFound {
+                file: sn4_path.display().to_string(),
+            });
+        }
+        if !sg4_path.exists() {
+            return Err(ScidError::FileNotFound {
+                file: sg4_path.display().to_string(),
+            });
+        }
+
+        // Parse index file
+        let mut si4_file = File::open(&si4_path)
+            .map_err(|e| ScidError::FileOpenError {
+                file: si4_path.display().to_string(),
+                source: e,
+            })?;
+
+        let header = parse_si4_header(&mut si4_file)?;
+
+        // Validate version
+        if header.version != 400 {
+            return Err(ScidError::UnsupportedVersion {
+                version: header.version,
+                supported: 400,
+            });
+        }
+
+        // Parse all index entries
+        let mut index_entries = Vec::with_capacity(header.num_games as usize);
+        for game_num in 0..header.num_games {
+            let mut entry_bytes = [0u8; 47];
+            si4_file.read_exact(&mut entry_bytes)
+                .map_err(|e| ScidError::ParseError {
+                    file: si4_path.clone(),
+                    offset: (182 + game_num * 47) as u64,
+                    message: format!("Failed to read index entry {}: {}", game_num, e),
+                })?;
+
+            let entry = parse_game_index_entry(&entry_bytes)?;
+            index_entries.push(entry);
+        }
+
+        // Parse name database
+        let sn4_file = File::open(&sn4_path)
+            .map_err(|e| ScidError::FileOpenError {
+                file: sn4_path.display().to_string(),
+                source: e,
+            })?;
+
+        let names = parse_name_database(sn4_file)?;
+
+        // Memory-map the game file
+        let sg4_file = File::open(&sg4_path)
+            .map_err(|e| ScidError::FileOpenError {
+                file: sg4_path.display().to_string(),
+                source: e,
+            })?;
+
+        let mmap = unsafe { Mmap::map(&sg4_file) }
+            .map_err(|e| ScidError::FileOpenError {
+                file: sg4_path.display().to_string(),
+                source: e,
+            })?;
+
+        Ok(ScidReader {
+            header,
+            index_entries,
+            names,
+            sg4_file,  // Keep file handle for compatibility
+            base_path,
+            // mmap: Some(mmap),  // Store mmap in struct
+        })
+    }
+
+    /// Fallback when mmap feature is not enabled
+    #[cfg(not(feature = "mmap"))]
+    pub fn open_mmap(path: impl AsRef<Path>) -> Result<Self> {
+        // Fall back to standard file access
+        Self::open(path)
+    }
+}
+```
+
+---
+
+#### Task 7.7.3: Feature Flag Configuration
+
+**Objective**: Document the mmap feature flag in Cargo.toml.
+
+**Implementation**:
+
+**File**: `crates/core/Cargo.toml` (features section)
+
+```toml
+[features]
+default = []
+
+# Enable memory-mapped file access for large databases
+mmap = ["memmap2"]
+
+[dependencies]
+memmap2 = { version = "0.9", optional = true }
+```
+
+**Usage Notes**:
+
+Enable memory mapping in your project:
+```toml
+[dependencies]
+scidtopgn-core = { version = "0.1", features = ["mmap"] }
 ```
 
 ---
@@ -1835,6 +2781,16 @@ pub fn games(&self) -> impl Iterator<Item = Result<Game>> + '_ {
 - [x] to_pgn() implemented
 - [x] write_pgn() implemented
 - [x] Prelude module implemented
+- [x] Error recovery types (ErrorMode, GameProcessResult, ConversionOptions, ConversionStats)
+- [x] write_pgn_with_recovery() method
+- [x] File access configuration (FileAccessMode, OpenOptions)
+- [x] open_with_options() and open_mmap() methods
+- [x] mmap feature flag configuration
+- [x] **Streaming as default (Gap 8)**: FileAccessMode::Streaming is default
+- [x] **Streaming game access (Gap 8)**: game() reads from disk on demand
+- [x] **Streaming documentation (Gap 8)**: Architecture diagram and best practices
+- [x] **Rating types export (Gap 15)**: RatingType, parse_rating() in prelude
+- [x] **Material signature export (Gap 16)**: MaterialSignature, MATSIG_* constants in prelude
 
 **API Quality**:
 - [ ] Follows Rust API Guidelines checklist
@@ -1881,8 +2837,8 @@ cargo clippy -- -D warnings
 **Expected Final Output**:
 ```
 === PHASE 7 VALIDATION SUMMARY ===
-Total test cases: 28
-Passing: 28
+Total test cases: 35
+Passing: 35
 Failing: 0
 
 API Quality Checklist:
@@ -1894,6 +2850,8 @@ API Quality Checklist:
 ✅ All public items documented
 ✅ All docs include examples
 ✅ No panics in public API
+✅ Error recovery modes (Strict/Lenient/BestEffort)
+✅ Memory mapping support (optional feature)
 
 Integration Test Results:
 - Open and parse 5-game database: PASS
@@ -1901,6 +2859,8 @@ Integration Test Results:
 - Convert to PGN: PASS (2.1 KB output)
 - Stream to file: PASS
 - Handle invalid files: PASS (proper errors)
+- Error recovery with Lenient mode: PASS
+- Memory-mapped open (mmap feature): PASS
 
 Example Usage:
 ```rust
@@ -1914,6 +2874,15 @@ for game in reader.games() {
     println!("{} vs {} ({})",
         game.white(), game.black(), game.result());
 }
+
+// With error recovery
+let options = ConversionOptions {
+    error_mode: ErrorMode::Lenient { max_errors: 10 },
+    include_partial: true,
+    ..Default::default()
+};
+let stats = reader.write_pgn_with_recovery(std::io::stdout(), &options)?;
+println!("Success rate: {:.1}%", stats.success_rate());
 ```
 
 ✅ Phase 7 Complete - Library Ready for Release!
@@ -1950,3 +2919,37 @@ for game in reader.games() {
 ---
 
 **Phase 7 represents the bridge between our robust internal implementation and the world of library users.** A well-designed public API makes the difference between a library that's technically correct and one that's actually pleasant to use. By following Rust best practices and providing comprehensive documentation, we create an API that users will enjoy working with.
+
+---
+
+## Revision History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | Initial | Original Phase 7 implementation plan |
+| 1.1 | Gap Resolution | Added Section 7.6 (Error Recovery Strategy from Gap 13): ErrorMode enum, GameProcessResult, ConversionOptions, ConversionStats, write_pgn_with_recovery() method. Added Section 7.7 (Memory Mapping from Gap 14): FileAccessMode enum, OpenOptions struct, open_with_options() and open_mmap() methods, mmap feature flag. Updated prelude and lib.rs re-exports. |
+| 1.2 | Gap 8 | **Streaming Architecture as Default**: Added streaming architecture diagram to Overview. Changed FileAccessMode default from InMemory to Streaming. Updated FileAccessMode documentation to explain why streaming is preferred. Updated OpenOptions default to use Streaming. Enhanced ScidReader Memory Usage documentation. Added new Task 7.4.3 documenting streaming game data access patterns. Added best practices for streaming vs in-memory operations. |
+| 1.3 | Gap 15, 16 | **Rating and Material Type Exports**: Added RatingType, MaterialSignature, parse_rating(), MATSIG_STANDARD_START, MATSIG_EMPTY to prelude and lib.rs re-exports. Added 2 new tests for type accessibility. Updated success criteria. |
+
+---
+
+### Gap 8 Summary: Streaming Mode
+
+**Key Principle**: Game data from the .sg4 file is **streamed from disk by default**, not loaded into memory.
+
+**What's in Memory**:
+- Index entries (47 bytes × num_games) - Required for offset lookup
+- Name database - Required for resolving player/event names
+
+**What's Streamed**:
+- All game data (moves, comments, tags) - Read on demand per game
+
+**Why This Matters**:
+- A 1-million game database might have 2GB of game data
+- Streaming uses ~50MB at startup regardless of game count
+- Loading into memory would require 2GB+ RAM
+
+**Changed Defaults**:
+- `FileAccessMode::Streaming` is now `#[default]`
+- `OpenOptions::default()` uses `FileAccessMode::Streaming`
+- Documentation emphasizes streaming as the primary/recommended mode

@@ -9,12 +9,12 @@ fn test_prelude_imports() {
     let _error = ScidError::invalid_format("test");
 
     // Verify GameResult is available
-    let result = GameResult::WhiteWins;
-    assert_eq!(result.to_pgn(), "1-0");
+    let _result = GameResult::WhiteWins;
+    assert_eq!(_result.to_pgn(), "1-0");
 
     // Verify GameDate is available
-    let date = GameDate::new(2022, 12, 19);
-    assert_eq!(date.to_pgn_string(), "2022.12.19");
+    let _date = GameDate::new(2022, 12, 19);
+    assert_eq!(_date.to_pgn_string(), "2022.12.19");
 
     // Verify shakmaty types are available
     let _square = Square::E4;
