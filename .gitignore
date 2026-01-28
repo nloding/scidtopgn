@@ -21,6 +21,15 @@
 /test/data/*.sn4
 /test/data/*.sg4
 
+# Test databases (large files - optionally track)
+# Uncomment to ignore:
+# /tests/data/*.si4
+# /tests/data/*.sn4
+# /tests/data/*.sg4
+
+# But track README
+!/tests/data/README.md
+
 # Generated documentation
 /target/doc
 

@@ -14,6 +14,7 @@ pub mod reader;
 pub mod types;
 
 // Re-exports
-// pub use reader::ScidReader;
-// pub use index::GameIndexEntry;
-// pub use types::*;
+pub use index::{
+    game_flags, parse_rating, MaterialSignature, RatingType, Si4Header, MATSIG_EMPTY,
+    MATSIG_STANDARD_START,
+};

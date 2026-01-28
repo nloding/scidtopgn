@@ -42,9 +42,9 @@ This guide provides a sequential checklist for implementing the SCID to PGN conv
 |------|-------------|------|--------|
 | 1.2.1 | Implement Error Types | 654 | [X] |
 | 1.2.2 | Implement Core Types (GameDate, GameResult) | 883 | [X] |
-| 1.2.3 | Implement Prelude Module | 1222 | [ ] |
-| 1.2.4 | Create Comprehensive Test Suite | 1309 | [ ] |
-| 1.2.5 | Final Phase 1 Validation | 1361 | [ ] |
+| 1.2.3 | Implement Prelude Module | 1222 | [X] |
+| 1.2.4 | Create Comprehensive Test Suite | 1309 | [X] |
+| 1.2.5 | Final Phase 1 Validation | 1361 | [X] |
 
 **Verification**: `cargo test -p scidtopgn-core` passes all tests
 
@@ -60,10 +60,10 @@ This guide provides a sequential checklist for implementing the SCID to PGN conv
 
 | Task | Description | Line | Status |
 |------|-------------|------|--------|
-| 2.1.1 | Create Header Data Structure (Si4Header) | 94 | [ ] |
-| 2.1.2 | Implement Header Parsing Function | 775 | [ ] |
-| 2.1.3 | Create Header Parsing Tests | 927 | [ ] |
-| 2.1.4 | Add Test Data Files | 1091 | [ ] |
+| 2.1.1 | Create Header Data Structure (Si4Header) | 94 | [X] |
+| 2.1.2 | Implement Header Parsing Function | 775 | [X] |
+| 2.1.3 | Create Header Parsing Tests | 927 | [X] |
+| 2.1.4 | Add Test Data Files | 1091 | [X] |
 
 **Verification**: `cargo test -p scidtopgn-core si4_header` passes
 
@@ -71,10 +71,10 @@ This guide provides a sequential checklist for implementing the SCID to PGN conv
 
 | Task | Description | Line | Status |
 |------|-------------|------|--------|
-| 2.2.1 | Create Game Index Entry Structure | 1175 | [ ] |
-| 2.2.2 | Implement Entry Parsing - Part 1 (Simple Fields) | 1540 | [ ] |
-| 2.2.3 | Implement Entry Parsing - Part 2 (Packed IDs) | 1688 | [ ] |
-| 2.2.4 | Implement Date Parsing (CRITICAL) | 1804 | [ ] |
+| 2.2.1 | Create Game Index Entry Structure | 1175 | [X] |
+| 2.2.2 | Implement Entry Parsing - Part 1 (Simple Fields) | 1540 | [X] |
+| 2.2.3 | Implement Entry Parsing - Part 2 (Packed IDs) | 1688 | [X] |
+| 2.2.4 | Implement Date Parsing (CRITICAL) | 1804 | [X] |
 | 2.2.5 | Implement Remaining Fields (Result, ELO, Counts) | 2027 | [ ] |
 | 2.2.6 | Integration Testing with Real Data | 2508 | [ ] |
 | 2.2.7 | Create Helper Functions and Documentation | 2605 | [ ] |
