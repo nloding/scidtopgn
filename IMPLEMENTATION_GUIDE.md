@@ -75,8 +75,8 @@ This guide provides a sequential checklist for implementing the SCID to PGN conv
 | 2.2.2 | Implement Entry Parsing - Part 1 (Simple Fields) | 1540 | [X] |
 | 2.2.3 | Implement Entry Parsing - Part 2 (Packed IDs) | 1688 | [X] |
 | 2.2.4 | Implement Date Parsing (CRITICAL) | 1804 | [X] |
-| 2.2.5 | Implement Remaining Fields (Result, ELO, Counts) | 2027 | [ ] |
-| 2.2.6 | Integration Testing with Real Data | 2508 | [ ] |
+| 2.2.5 | Implement Remaining Fields (Result, ELO, Counts) | 2027 | [X] |
+| 2.2.6 | Integration Testing with Real Data | 2508 | [X] |
 | 2.2.7 | Create Helper Functions and Documentation | 2605 | [ ] |
 | 2.2.8 | Final Phase 2 Validation | 2771 | [ ] |
 
@@ -117,8 +117,8 @@ This guide provides a sequential checklist for implementing the SCID to PGN conv
 | 3.2.6 | Connect Names to Index Entries | 1390 | [ ] |
 | 3.2.7 | Performance Testing and Optimization | 1511 | [ ] |
 | 3.2.8 | Final Phase 3 Validation | 1575 | [ ] |
-| 3.2.9 | Name ID Lookup and Edge Cases | 1670 | [ ] |
-| 3.2.10 | Round String Formats and PGN Escaping | 1793 | [ ] |
+| 3.2.9 | Name ID Lookup and Edge Cases | 1670 | [X] |
+| 3.2.10 | Round String Formats and PGN Escaping | 1793 | [X] |
 
 **Verification**: `cargo test -p scidtopgn-core names` passes
 
@@ -149,7 +149,7 @@ This guide provides a sequential checklist for implementing the SCID to PGN conv
 
 | Task | Description | Line | Status |
 |------|-------------|------|--------|
-| 4.2.1 | Understand Tag Section Structure (Educational) | 768 | [ ] |
+| 4.2.1 | Understand Tag Section Structure (Educational) | 768 | [X] |
 | 4.2.2 | Implement Tag Parsing Function | 1000 | [ ] |
 | 4.2.3 | Implement Flags and FEN Parsing | 1331 | [ ] |
 | 4.2.4 | Integration Testing with Real Data | 1601 | [ ] |
@@ -271,8 +271,8 @@ This guide provides a sequential checklist for implementing the SCID to PGN conv
 
 | Task | Description | Line | Status |
 |------|-------------|------|--------|
-| 7.1.1 | Educational - API Design Principles | 309 | [ ] |
-| 7.1.2 | Design ScidReader API Surface | 417 | [ ] |
+| 7.1.1 | Educational - API Design Principles | 309 | [X] |
+| 7.1.2 | Design ScidReader API Surface | 417 | [X] |
 
 ### Section 7.2: ScidReader Implementation
 
@@ -406,7 +406,7 @@ This guide provides a sequential checklist for implementing the SCID to PGN conv
 |------|-------------|--------|
 | 10.1 | API Documentation | [ ] |
 | 10.2 | README and Examples | [ ] |
-| 10.3 | CHANGELOG | [ ] |
+| 10.3 | CHANGELOG | [X] |
 | 10.4 | Release Preparation | [ ] |
 
 **Verification**: `cargo doc --open` shows complete docs

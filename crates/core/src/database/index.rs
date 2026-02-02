@@ -24,6 +24,7 @@
 //! - Lines 120-210: Game entry specification
 //! - Lines 1013-1051: Endianness (BIG-ENDIAN required!)
 
+use crate::database::names::NameDatabase;
 use crate::error::{Result, ScidError};
 use crate::types::{GameDate, GameResult};
 use std::fs::File;
@@ -968,6 +969,39 @@ impl GameIndexEntry {
     pub fn eco_to_string(&self) -> Option<String> {
         eco_to_string(self.eco_code)
     }
+
+    /// Get player names from name database
+    ///
+    /// # Arguments
+    ///
+    /// * `names` - Name database to look up names
+    ///
+    /// # Returns
+    ///
+    /// Tuple of (white_name, black_name)
+    pub fn get_player_names<'a>(
+        &self,
+        names: &'a NameDatabase,
+    ) -> (Option<&'a str>, Option<&'a str>) {
+        let white = names.get_player(self.white_id);
+        let black = names.get_player(self.black_id);
+        (white, black)
+    }
+
+    /// Get event name from name database
+    pub fn get_event_name<'a>(&self, names: &'a NameDatabase) -> Option<&'a str> {
+        names.get_event(self.event_id)
+    }
+
+    /// Get site name from name database
+    pub fn get_site_name<'a>(&self, names: &'a NameDatabase) -> Option<&'a str> {
+        names.get_site(self.site_id)
+    }
+
+    /// Get round name from name database
+    pub fn get_round_name<'a>(&self, names: &'a NameDatabase) -> Option<&'a str> {
+        names.get_round(self.round_id)
+    }
 }
 
 /// Convert an ECO code value to its string representation
@@ -1068,7 +1102,7 @@ impl Default for GameIndexEntry {
 /// Valid offsets are 1-7, allowing events from 3 years before to 3 years after.
 ///
 /// See SCID_DATABASE_FORMAT.md lines 211-313 for complete specification.
-fn parse_dates_field(dates_field: u32) -> (GameDate, Option<GameDate>) {
+pub fn parse_dates_field(dates_field: u32) -> (GameDate, Option<GameDate>) {
     // Extract game date (lower 20 bits)
     let game_date_raw = dates_field & 0x000F_FFFF;
 
@@ -2078,5 +2112,142 @@ mod tests {
         assert_eq!(event.year, 2020); // 2023 + 1 - 4 = 2020
         assert_eq!(event.month, 1);
         assert_eq!(event.day, 1);
+    }
+}
+
+/// Parse entire index file and return header + all entries
+///
+/// This is a convenience function that reads the SI4 header and then parses
+/// all game index entries sequentially. Returns all entries in a Vec for
+/// easy access and iteration.
+///
+/// # Arguments
+///
+/// * `path` - Path to .si4 file
+///
+/// # Returns
+///
+/// Tuple of (header, vector of entries)
+///
+/// # Example
+///
+/// ```no_run
+/// use scidtopgn_core::database::index::parse_si4_file;
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let (header, entries) = parse_si4_file("database.si4")?;
+/// println!("Loaded {} games", entries.len());
+///
+/// for (i, entry) in entries.iter().enumerate() {
+///     println!("Game {}: {} - Result: {}",
+///         i + 1,
+///         entry.game_date.to_pgn_string(),
+///         entry.result
+///     );
+/// }
+/// # Ok(())
+/// # }
+/// ```
+pub fn parse_si4_file(path: impl AsRef<Path>) -> Result<(Si4Header, Vec<GameIndexEntry>)> {
+    let mut file = File::open(path.as_ref())?;
+
+    // Parse header
+    let header = parse_si4_header(&mut file)?;
+
+    // Parse all game entries
+    let mut entries = Vec::with_capacity(header.num_games as usize);
+
+    for game_num in 0..header.num_games {
+        let mut entry_bytes = [0u8; GAME_ENTRY_SIZE];
+        file.read_exact(&mut entry_bytes)
+            .map_err(|e| ScidError::ParseError {
+                file: path.as_ref().to_path_buf(),
+                offset: SI4_HEADER_SIZE as u64 + (game_num * GAME_ENTRY_SIZE as u32) as u64,
+                message: format!("Failed to read game {} entry: {}", game_num + 1, e),
+            })?;
+
+        let entry = parse_game_index_entry(&entry_bytes)?;
+        entries.push(entry);
+    }
+
+    Ok((header, entries))
+}
+
+/// Iterator over game index entries
+///
+/// Allows lazy loading of entries without reading entire file into memory.
+/// This is useful for large databases where you want to process games one at a time
+/// without loading all entries into memory.
+///
+/// # Example
+///
+/// ```no_run
+/// use scidtopgn_core::database::index::IndexEntryIter;
+/// use std::fs::File;
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut file = File::open("database.si4")?;
+///
+/// // Parse header first to get number of games
+/// let mut cursor = [0u8; SI4_HEADER_SIZE];
+/// file.read_exact(&cursor)?;
+/// let header = parse_si4_header(&mut std::io::Cursor::new(cursor))?;
+///
+/// // Create iterator that reads entries one at a time
+/// let mut iter = IndexEntryIter::new(file, header.num_games)?;
+///
+/// while let Some(entry_result) = iter.next() {
+///     let entry = entry_result?;
+///     println!("Game {}: {}", entry.game_date.to_pgn_string(), entry.result);
+/// }
+/// # Ok(())
+/// # }
+/// ```
+pub struct IndexEntryIter {
+    file: File,
+    current_game: u32,
+    total_games: u32,
+}
+
+impl IndexEntryIter {
+    /// Create iterator from opened .si4 file
+    ///
+    /// File must be positioned after header (offset 182).
+    /// This function will seek to the first entry automatically.
+    ///
+    /// # Arguments
+    ///
+    /// * `file` - Mutable reference to opened .si4 file (will seek to first entry)
+    /// * `total_games` - Total number of games in database
+    ///
+    /// # Returns
+    ///
+    /// Iterator that yields `Result<GameIndexEntry>` for each game
+    pub fn new(mut file: File, total_games: u32) -> Result<Self> {
+        // Seek to first entry
+        file.seek(SeekFrom::Start(SI4_HEADER_SIZE as u64))?;
+
+        Ok(IndexEntryIter {
+            file,
+            current_game: 0,
+            total_games,
+        })
+    }
+}
+
+impl Iterator for IndexEntryIter {
+    type Item = Result<GameIndexEntry>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_game >= self.total_games {
+            return None;
+        }
+
+        let mut entry_bytes = [0u8; GAME_ENTRY_SIZE];
+        match self.file.read_exact(&mut entry_bytes) {
+            Ok(_) => {
+                self.current_game += 1;
+                Some(parse_game_index_entry(&entry_bytes))
+            }
+            Err(e) => Some(Err(ScidError::Io(e))),
+        }
     }
 }

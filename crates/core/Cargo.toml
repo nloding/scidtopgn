@@ -14,6 +14,23 @@ categories = ["parser-implementations", "data-structures"]
 thiserror.workspace = true
 shakmaty.workspace = true
 byteorder.workspace = true
+flate2 = "1.0"
+memmap2 = { version = "0.9", optional = true }
+
+[features]
+default = []
+mmap = ["memmap2"]
 
 [dev-dependencies]
 pretty_assertions.workspace = true
+criterion.workspace = true
+proptest.workspace = true
+tempfile = "3.8"
+
+[[bench]]
+name = "name_parsing_bench"
+harness = false
+
+[[bench]]
+name = "memory_benchmark"
+harness = false

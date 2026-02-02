@@ -1,1 +1,6 @@
-// Placeholder - will be implemented in Phase 6
+//! Format module for PGN and chess notation
+//!
+//! This module provides functionality for formatting chess games
+//! in PGN (Portable Game Notation) format.
+
+pub use pgn::PgnOptions;

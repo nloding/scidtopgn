@@ -4,6 +4,8 @@
 
 pub mod converter;
 pub mod pgn;
+pub mod san;
+pub mod tags;
 
 // Re-exports
 // pub use converter::PgnOptions;
