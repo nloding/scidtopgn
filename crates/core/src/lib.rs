@@ -107,19 +107,26 @@
 #![warn(missing_docs)]
 #![warn(missing_doc_code_examples)]
 
+pub mod database;
+mod error;
+pub mod format;
+mod game;
+mod prelude;
+mod reader;
+mod types;
+
 // Public API
 pub use error::{Result, ScidError};
 pub use game::Game;
-pub use prelude::Prelude;
 
 // ScidReader is the main entry point
 pub use reader::ScidReader;
 
 // Re-export error recovery types (Gap 13)
-pub use reader::{ConversionOptions, ConversionStats, ErrorMode, GameProcessResult};
+pub use database::{ConversionOptions, ConversionStats, ErrorMode, GameProcessResult};
 
 // Re-export file access types (Gap 14)
-pub use reader::{FileAccessMode, OpenOptions};
+pub use database::{FileAccessMode, OpenOptions};
 
 // Test utilities module (only compiled during testing)
 #[cfg(test)]

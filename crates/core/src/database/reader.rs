@@ -3,8 +3,8 @@
 //! This module provides the public API for reading SCID databases and converting them to PGN.
 
 use crate::database::games::GameData;
-use crate::database::index::{parse_si4_header, GameIndexEntry, Si4Header};
-use crate::database::names::NameDatabase;
+use crate::database::index::{parse_game_index_entry, parse_si4_header, GameIndexEntry, Si4Header};
+use crate::database::names::{parse_name_database, NameDatabase};
 use crate::error::{Result, ScidError};
 use flate2::read::ZlibDecoder;
 use shakmaty::Move;
@@ -913,24 +913,6 @@ impl ScidReader {
     /// # Arguments
     ///
     /// * `idx` - Game index (0-based)
-    ///
-    /// # Returns
-    ///
-    /// Parsed GameData or error if index is out of range.
-    pub fn game(&mut self, idx: usize) -> Result<GameData> {
-        if idx >= self.index_entries.len() {
-            return Err(ScidError::InvalidGameIndex(idx));
-        }
-
-        let entry = &self.index_entries[idx];
-        crate::database::games::parse_game(
-            &mut self.sg4_file,
-            entry.game_offset,
-            entry.game_length,
-            None,
-        )
-    }
-
     /// Returns a specific game by index.
     ///
     /// Games are numbered from 0 to `game_count() - 1`.

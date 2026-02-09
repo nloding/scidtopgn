@@ -1,5 +1,5 @@
 use crate::error::{Result, ScidError};
-use shakmaty::{san::San, Bitboard, Move, Position};
+use shakmaty::{fen::Fen, san::San, Bitboard, Chess, Move, Position};
 use std::path::PathBuf;
 
 /// Stateful SAN (Standard Algebraic Notation) generator

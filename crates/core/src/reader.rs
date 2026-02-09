@@ -562,7 +562,7 @@ impl<'a> GameIterator<'a> {
 }
 
 impl<'a> Iterator for GameIterator<'a> {
-    type Item = Result<Game, ScidError>;
+    type Item = Result<Game>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.index < self.reader.game_count() {
@@ -571,10 +571,7 @@ impl<'a> Iterator for GameIterator<'a> {
             Some(
                 self.reader
                     .game(index)
-                    .ok_or_else(|| ScidError::InvalidIndex {
-                        index,
-                        max: self.reader.game_count(),
-                    }),
+                    .ok_or_else(|| ScidError::InvalidGameIndex(index)),
             )
         } else {
             None

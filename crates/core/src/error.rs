@@ -104,6 +104,12 @@ pub enum ScidError {
     #[error("Encoding error: {0}")]
     Encoding(String),
 
+    /// Decompression error
+    ///
+    /// Failed to decompress zlib-compressed game data.
+    #[error("Decompression error: {0}")]
+    DecompressionError(String),
+
     /// Data validation error
     ///
     /// The file structure is valid but the data doesn't make sense.

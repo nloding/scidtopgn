@@ -152,10 +152,10 @@ pub use crate::database::{
 };
 
 // Re-export error recovery types (Gap 13)
-pub use crate::reader::{ConversionOptions, ConversionStats, ErrorMode, GameProcessResult};
+pub use crate::database::{ConversionOptions, ConversionStats, ErrorMode, GameProcessResult};
 
 // Re-export file access types (Gap 14)
-pub use crate::reader::{FileAccessMode, OpenOptions};
+pub use crate::database::{FileAccessMode, OpenOptions};
 
 // Re-export commonly used shakmaty types for convenience
 pub use shakmaty::{Color, Move as ChessMove, Role, Square};

@@ -3,4 +3,4 @@
 //! This module provides functionality for formatting chess games
 //! in PGN (Portable Game Notation) format.
 
-pub use pgn::PgnOptions;
+pub use crate::format::pgn::PgnOptions;

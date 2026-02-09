@@ -345,6 +345,11 @@ impl NameDatabase {
             None => NameLookupResult::OutOfBounds(id),
         }
     }
+
+    /// Get the number of players in the database
+    pub fn player_count(&self) -> usize {
+        self.players.len()
+    }
 }
 
 /// Parse SN4 header from file
@@ -836,6 +841,34 @@ pub fn parse_name_database(
         sites,
         rounds,
     })
+}
+
+/// Load name database from a .sn4 file
+///
+/// This is a convenience function that opens the file and parses it.
+///
+/// # Arguments
+///
+/// * `path` - Path to the .sn4 file
+///
+/// # Returns
+///
+/// Parsed NameDatabase
+///
+/// # Errors
+///
+/// - `ScidError::Io` - Failed to open file
+/// - `ScidError::InvalidFormat` - Invalid file format
+pub fn load_names<P: AsRef<std::path::Path>>(
+    path: P,
+) -> Result<NameDatabase, crate::error::ScidError> {
+    use std::fs::File;
+    use std::io::BufReader;
+
+    let file = File::open(path.as_ref()).map_err(|e| crate::error::ScidError::Io(e))?;
+
+    let reader = BufReader::new(file);
+    parse_name_database(reader)
 }
 
 #[cfg(test)]
