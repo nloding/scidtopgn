@@ -1,31 +1,26 @@
 [workspace]
+members = ["crates/scidtopgn", "crates/scidtopgn-cli"]
 resolver = "2"
-members = ["crates/core", "crates/cli"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 authors = ["Chess Database Converter"]
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0-or-later"
 repository = "https://github.com/nloding/scidtopgn"
 rust-version = "1.70"
 
 [workspace.dependencies]
-# Error handling
-thiserror = "1.0"
 anyhow = "1.0"
+thiserror = "1.0"
+tempfile = "3"
 
-# Chess logic
-shakmaty = "0.26"
+[package]
+name = "scidtopgn-workspace"
+version.workspace = true
+edition.workspace = true
+publish = false
 
-# Binary parsing
-byteorder = "1.5"
-
-# CLI (for cli crate only)
-clap = { version = "4.5", features = ["derive"] }
-
-# Testing
-pretty_assertions = "1.4"
-criterion = "0.5"
-proptest = "1.4"
-tempfile = "3.8"
+[dev-dependencies]
+scidtopgn = { path = "crates/scidtopgn" }
+tempfile = { workspace = true }
