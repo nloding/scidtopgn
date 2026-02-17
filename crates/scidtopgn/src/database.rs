@@ -3,12 +3,15 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::bytebuf::ByteBuffer;
+use crate::common::{Piece, Square};
 use crate::error::{Error, Result};
 use crate::game::{Game, GAME_DECODE_ALL};
 use crate::gfile::GFile;
 use crate::index::{Index, IndexEntry};
+use crate::mov::{encode_bishop, encode_king, encode_knight, encode_pawn, encode_queen, encode_rook};
 use crate::namebase::NameType;
 use crate::nfile::NFile;
+use crate::position::Board;
 use crate::Date;
 
 pub struct Database {
@@ -182,6 +185,13 @@ impl Database {
             entry.set_black_elo(elo);
         }
         
+        if let Some(ref eco) = game.eco {
+            let eco_code = crate::index::eco_from_string(eco);
+            if eco_code > 0 {
+                entry.set_eco_code(eco_code);
+            }
+        }
+        
         let game_num = self.index.add_entry(entry)?;
         
         self.modified = true;
@@ -244,6 +254,11 @@ impl Database {
 
     fn encode_moves(&self, buf: &mut ByteBuffer, game: &Game, start_idx: usize) -> Result<()> {
         let mut current_idx = Some(start_idx);
+        let mut board = if game.non_standard_start {
+            game.start_board.clone().unwrap_or_else(Board::std_start)
+        } else {
+            Board::std_start()
+        };
         
         while let Some(idx) = current_idx {
             if idx >= game.moves.len() {
@@ -262,24 +277,72 @@ impl Database {
                 }
             }
             
-            if let Some(_var_child) = node.var_child {
-                for nag in &node.nags {
-                    buf.put_byte(crate::mov::ENCODE_NAG)?;
-                    buf.put_byte(*nag)?;
+            let sm = &node.move_data;
+            if sm.from != sm.to {
+                let piece = board.get_piece(sm.from)
+                    .map(|(p, _)| p)
+                    .unwrap_or(Piece::Empty);
+                
+                match piece {
+                    Piece::King => encode_king(buf, sm)?,
+                    Piece::Queen => encode_queen(buf, sm)?,
+                    Piece::Rook => encode_rook(buf, sm)?,
+                    Piece::Bishop => encode_bishop(buf, sm)?,
+                    Piece::Knight => encode_knight(buf, sm)?,
+                    Piece::Pawn => encode_pawn(buf, sm)?,
+                    Piece::Empty => {}
                 }
                 
-                if node.comment.is_some() {
-                    buf.put_byte(crate::mov::ENCODE_COMMENT)?;
-                }
-            } else {
-                for nag in &node.nags {
-                    buf.put_byte(crate::mov::ENCODE_NAG)?;
-                    buf.put_byte(*nag)?;
+                let color = board.to_move;
+                
+                if sm.captured_square.is_valid() {
+                    if let Some((_cap_piece, cap_color)) = board.get_piece(sm.captured_square) {
+                        if cap_color != color {
+                            board.remove_from_board(sm.captured_square);
+                            board.piece_list.remove_piece(sm.captured_square, cap_color);
+                        }
+                    }
                 }
                 
-                if node.comment.is_some() {
-                    buf.put_byte(crate::mov::ENCODE_COMMENT)?;
+                if let Some((_, _)) = board.get_piece(sm.from) {
+                    board.remove_from_board(sm.from);
+                    
+                    if sm.promote != Piece::Empty {
+                        board.add_to_board(sm.promote, color, sm.to);
+                    } else {
+                        board.add_to_board(piece, color, sm.to);
+                    }
+                    
+                    board.piece_list.move_piece(sm.from, sm.to, color);
+                    
+                    if piece == Piece::King {
+                        let diff = sm.to.to_index() as i32 - sm.from.to_index() as i32;
+                        if diff == 2 {
+                            let rook_from = Square::make(7, sm.from.rank());
+                            let rook_to = Square::make(5, sm.from.rank());
+                            board.remove_from_board(rook_from);
+                            board.add_to_board(Piece::Rook, color, rook_to);
+                            board.piece_list.move_piece(rook_from, rook_to, color);
+                        } else if diff == -2 {
+                            let rook_from = Square::make(0, sm.from.rank());
+                            let rook_to = Square::make(3, sm.from.rank());
+                            board.remove_from_board(rook_from);
+                            board.add_to_board(Piece::Rook, color, rook_to);
+                            board.piece_list.move_piece(rook_from, rook_to, color);
+                        }
+                    }
                 }
+                
+                board.to_move = board.to_move.flip();
+            }
+            
+            for nag in &node.nags {
+                buf.put_byte(crate::mov::ENCODE_NAG)?;
+                buf.put_byte(*nag)?;
+            }
+            
+            if node.comment.is_some() {
+                buf.put_byte(crate::mov::ENCODE_COMMENT)?;
             }
             
             if node.var_child.is_some() {

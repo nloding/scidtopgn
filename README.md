@@ -22,6 +22,8 @@ cargo build --release
 
 ## CLI Usage
 
+### Export (SCID → PGN)
+
 ```bash
 # Convert a SCID database to PGN (outputs to stdout)
 scidtopgn /path/to/database
@@ -29,11 +31,39 @@ scidtopgn /path/to/database
 # Write to a file instead
 scidtopgn /path/to/database -o output.pgn
 
+# Overwrite existing output file
+scidtopgn /path/to/database -o output.pgn --overwrite
+
 # Show game count only
 scidtopgn /path/to/database --count
 
 # Verbose output
 scidtopgn /path/to/database -v
+
+# Explicit export subcommand (same as above)
+scidtopgn export /path/to/database -o output.pgn
+```
+
+### Import (PGN → SCID)
+
+```bash
+# Import a PGN file to a new SCID database
+scidtopgn import games.pgn -o mydb
+
+# Append to existing database (default behavior)
+scidtopgn import more_games.pgn -o mydb
+
+# Overwrite existing database
+scidtopgn import games.pgn -o mydb --overwrite
+
+# Read PGN from stdin
+scidtopgn import - -o mydb
+
+# Abort on parse errors instead of skipping games
+scidtopgn import games.pgn -o mydb --on-error=abort
+
+# Verbose output
+scidtopgn import games.pgn -o mydb -v
 ```
 
 **Note**: Specify the database path without the file extensions (e.g., use `mydb` not `mydb.si4`).
@@ -102,7 +132,7 @@ cargo build
 # Build release version (optimized)
 cargo build --release
 
-# Run all tests (138 tests)
+# Run all tests (142 tests)
 cargo test --all
 
 # Run CLI directly
@@ -134,7 +164,7 @@ cargo run -p scidtopgn-cli -- /path/to/database
 ## Dependencies
 
 - [shakmaty](https://github.com/niklasf/shakmaty) - Chess move generation and validation
-- [thiserror](https://github.com/niklasf/thiserror) - Error handling
+- [thiserror](https://github.com/dtolnay/thiserror) - Error handling
 - [clap](https://github.com/clap-rs/clap) - CLI argument parsing
 
 ## SCID Format Reference
