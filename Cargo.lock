@@ -330,13 +330,6 @@ dependencies = [
  "anyhow",
  "clap",
  "scidtopgn",
-]
-
-[[package]]
-name = "scidtopgn-workspace"
-version = "0.1.0"
-dependencies = [
- "scidtopgn",
  "tempfile",
 ]
 

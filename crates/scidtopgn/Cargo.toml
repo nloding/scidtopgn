@@ -15,4 +15,4 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4"
-tempfile = "3"
+tempfile = { workspace = true }

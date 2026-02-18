@@ -16,3 +16,7 @@ path = "src/main.rs"
 scidtopgn = { path = "../scidtopgn" }
 anyhow = { workspace = true }
 clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+scidtopgn = { path = "../scidtopgn" }
