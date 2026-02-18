@@ -1,0 +1,22 @@
+[package]
+name = "scidtopgn-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CLI tool for converting SCID databases to/from PGN format"
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "scidtopgn"
+path = "src/main.rs"
+
+[dependencies]
+scidtopgn = { path = "../scidtopgn" }
+anyhow = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+scidtopgn = { path = "../scidtopgn" }

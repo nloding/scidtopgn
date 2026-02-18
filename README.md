@@ -1,107 +1,103 @@
-# SCID to PGN Converter
+![scidtopgn](./assets/scidtopgn.png)
 
-A command-line tool written in Rust to convert SCID chess databases (.si4/.sg4/.sn4) to PGN format. This also serves as an experiment with vibe coding from an AI skeptic.
+A Rust library and CLI for converting between SCID (.si4/.sn4/.sg4) and PGN formats. Fast, accurate, and functional on Windows, Mac, and Linux.
 
-## Features
+![animation showing scidtopgn in the terminal](./assets/scidtopgn.gif)
 
-- Convert SCID databases to standard PGN format
-- Support for game metadata (players, events, sites, dates, ratings)
-- Optional inclusion of variations and comments
-- Progress reporting for large databases
-- Force overwrite protection
+## Quick start (CLI)
 
-## Installation
+> [!CAUTION]
+> This library is still in beta; you must build it from source. For now! Once some additional testing has been done, you'll be able to download it separately.
 
 ```bash
-cd scidtopgn
+# build it
 cargo build --release
-```
 
-The binary will be available at `target/release/scidtopgn`.
-
-## Usage
-
-```bash
-# Convert a SCID database to PGN
+# dump a SCID database to PGN
 scidtopgn /path/to/database
 
-# Specify output file
+# save it to a file
 scidtopgn /path/to/database -o output.pgn
 
-# Include variations and comments
-scidtopgn /path/to/database --variations --comments
-
-# Limit number of games exported
-scidtopgn /path/to/database --max-games 1000
-
-# Force overwrite existing output file
-scidtopgn /path/to/database --force
+# go the other direction — PGN into a fresh SCID database
+scidtopgn import games.pgn -o mydb
 ```
 
-## Arguments
+> [!NOTE]
+> Specify database paths *without* extensions — use `mydb`, not `mydb.si4`.
 
-- `DATABASE`: Path to the SCID database (without extension - will look for .si4, .sg4, .sn4)
-- `-o, --output FILE`: Output PGN file (if not specified, uses database name with .pgn extension)
-- `-f, --force`: Force overwrite existing output file
-- `-v, --variations`: Include variations in PGN output
-- `-c, --comments`: Include comments in PGN output
-- `--max-games N`: Maximum number of games to export (0 = all games)
+## CLI usage
 
-## File Format Support
+### Export (SCID → PGN)
 
-This tool supports SCID database format version 4, which consists of three files:
-
-- `.si4`: Index file containing meta-information for each game
-- `.sg4`: Game file containing actual moves, variations and comments  
-- `.sn4`: Name file containing player names, tournament names, etc.
-
-## Current Limitations
-
-This is an initial implementation with the following limitations:
-
-1. **Date parsing**: The SCID binary date format is not correctly parsed yet. Dates show as "????.??.??" for now.
-
-2. **Move parsing**: The SCID move encoding is very complex and not fully implemented yet. Games will be exported with metadata but moves are currently placeholders.
-
-3. **Name parsing**: The .sn4 name file parsing is simplified and uses placeholder names.
-
-4. **Variations and comments**: While the structure is in place, full parsing of variations and comments from the .sg4 file is not yet implemented.
-
-## Development Status
-
-This project follows Rust best practices for CLI applications:
-
-- Modular structure with separate modules for SCID parsing and PGN export
-- Error handling using `std::io::Result`
-- Command-line argument parsing with `clap`
-- Proper project structure with `src/`, `Cargo.toml`, etc.
-
-## Contributing
-
-The main areas that need work:
-
-1. **SCID move decoding**: Implement the complex move encoding used by SCID
-2. **Name file parsing**: Properly parse the .sn4 name file format
-3. **Variation support**: Parse and export chess variations
-4. **Comment support**: Parse and export chess comments and annotations
-
-## Architecture
-
+```bash
+scidtopgn /path/to/database              # stdout
+scidtopgn /path/to/database -o out.pgn   # to file
+scidtopgn /path/to/database --count      # just tell me how many games
+scidtopgn export /path/to/database       # explicit subcommand, same thing
 ```
-src/
-├── main.rs              # CLI entry point and argument parsing
-├── scid/                # SCID database parsing
-│   ├── mod.rs           # Module exports
-│   ├── database.rs      # Main database coordination
-│   ├── index.rs         # .si4 index file parsing
-│   ├── names.rs         # .sn4 name file parsing
-│   ├── games.rs         # .sg4 game file parsing
-│   └── moves.rs         # Move encoding/decoding
-└── pgn/                 # PGN export functionality
-    ├── mod.rs           # Module exports
-    └── exporter.rs      # PGN file generation
+
+#### Export arguments
+
+| Argument | Short | Required | Default | Description |
+|----------|-------|----------|---------|-------------|
+| `database` | - | Yes | - | Path to SCID database (without file extension) |
+| `--output` | `-o` | No | stdout | Output file path |
+| `--count` | - | No | - | Just print the number of games and exit |
+| `--overwrite` | - | No | - | Overwrite the output file if it already exists |
+| `--verbose` | `-v` | No | - | Verbose output |
+
+### Import (PGN → SCID)
+
+```bash
+scidtopgn import games.pgn -o mydb               # create or append
+scidtopgn import games.pgn -o mydb --overwrite    # start fresh
+scidtopgn import - -o mydb                        # read from stdin
+scidtopgn import games.pgn -o mydb --on-error=abort  # strict mode
 ```
+
+By default, import appends to an existing database. Bad games get skipped with a warning unless you pass `--on-error=abort`.
+
+#### Import arguments
+
+| Argument | Short | Required | Default | Description |
+|----------|-------|----------|---------|-------------|
+| `pgn_file` | - | Yes | - | PGN file to import (use `-` for stdin) |
+| `--output` | `-o` | Yes | - | Output database path (without file extension) |
+| `--overwrite` | - | No | - | Overwrite existing database instead of appending |
+| `--on-error` | - | No | `skip` | Error handling strategy: `skip` or `abort` |
+| `--verbose` | `-v` | No | - | Verbose output |
+
+## Use it as a library
+
+```rust
+use scidtopgn::Database;
+
+let mut db = Database::open("path/to/database")?;
+
+for game in db.games() {
+    let game = game?;
+    println!("{}", game.to_pgn());
+}
+
+// or grab a specific game
+let game = db.get_game(0)?;
+println!("{} vs {}", game.white, game.black);
+```
+
+## Building & testing
+
+```bash
+cargo build              # debug
+cargo build --release    # optimized
+cargo test --workspace   # run the full suite
+cargo run -p scidtopgn-cli -- /path/to/database  # run without installing
+```
+
+## SCID format docs
+
+If you're the kind of person who wants to understand the binary format, see `SCID_DATABASE_FORMAT.md`.
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under the MIT License.
